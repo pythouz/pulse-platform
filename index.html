@@ -38,13 +38,16 @@
 
     .section-label { font-size: 0.72rem; font-weight: 600; color: var(--ink-faint); margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-light); letter-spacing: 0.05em; }
 
-    .community-item { display: flex; align-items: center; gap: 0.65rem; padding: 0.55rem 0.6rem; border-radius: 6px; cursor: pointer; transition: background 0.15s; margin-bottom: 2px; }
-    .community-item:hover { background: var(--warm-cream); }
-    .community-item.active { background: var(--soft-beige); }
-    .community-name { font-size: 0.85rem; font-weight: 500; color: var(--ink-soft); }
-
-    .article-card { border-bottom: 1px solid var(--border-light); padding: 2rem 0; }
+    .article-card { border-bottom: 1px solid var(--border-light); padding: 2rem 0; display: flex; gap: 1.25rem; }
     .article-card:first-child { padding-top: 0; }
+    
+    /* رصيد التصويت على طريقة ريديت */
+    .vote-panel { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; min-width: 40px; }
+    .vote-btn { background: none; border: none; cursor: pointer; color: var(--ink-faint); font-size: 1.2rem; transition: color 0.15s; padding: 2px; }
+    .vote-btn:hover { color: var(--accent-rust); }
+    .vote-count { font-size: 0.85rem; font-weight: 700; color: var(--ink-soft); }
+
+    .article-content { flex: 1; }
     .article-meta { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.85rem; }
     .author-avatar { width: 28px; height: 28px; border-radius: 50%; }
     .author-name { font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); }
@@ -52,6 +55,9 @@
     .article-tag { margin-right: auto; font-size: 0.68rem; font-weight: 600; padding: 2px 8px; border-radius: 3px; background: var(--warm-cream); color: var(--ink-muted); border: 1px solid var(--border); }
     .article-title { font-size: 1.35rem; font-weight: 700; line-height: 1.4; color: var(--ink); margin-bottom: 0.6rem; }
     .article-excerpt { font-family: 'Source Serif 4', serif; font-size: 0.98rem; line-height: 1.75; color: var(--ink-muted); margin-bottom: 1.25rem; white-space: pre-wrap; }
+
+    .action-trigger { font-size: 0.78rem; color: var(--ink-muted); cursor: pointer; margin-left: 1rem; background: none; border: none; }
+    .action-trigger:hover { color: var(--accent-rust); text-decoration: underline; }
 
     .profile-card { text-align: center; padding-bottom: 1.25rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-light); }
     .profile-avatar { width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 0.85rem; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; font-weight: 700; color: white; background: var(--ink-muted); }
@@ -87,7 +93,7 @@
   <header class="site-header">
     <div style="max-width:1300px; margin:0 auto; padding:0 1.5rem; height:57px; display:flex; align-items:center; justify-content:space-between;">
       <div class="logo">Pulse<span>.</span></div>
-      <span style="font-size:0.8rem; color:var(--ink-faint);">منصة اجتماعية عامة مدعومة بالكامل بـ GitHub</span>
+      <span style="font-size:0.8rem; color:var(--ink-faint);">منصة اجتماعية مفتوحة المصدر بالكامل وعالية الأداء</span>
     </div>
   </header>
 
@@ -113,10 +119,11 @@
 
   <script>
     const GITHUB_API = 'https://api.github.com';
-    const PLATFORM_REPO = 'pythouz/pulse-platform'; // ريبو المنصة المركزي الخاص بك
+    const PLATFORM_REPO = 'pythouz/pulse-platform'; 
 
     let currentUser = JSON.parse(localStorage.getItem('pulseUser') || 'null');
     let githubToken = localStorage.getItem('pulseGithubToken') || '';
+    let cachedPosts = []; // حفظ الكاش المحلي للتحديث الفوري السريع
 
     function showToast(msg) {
       const t = document.getElementById('toast');
@@ -135,7 +142,7 @@
           <div class="modal-box" onclick="event.stopPropagation()">
             <div class="modal-title">ربط حساب GitHub</div>
             <p style="font-size:.82rem; color:var(--ink-muted); line-height:1.6; margin-bottom:1rem;">
-              أدخل اسم مستخدم جيت هب والـ Personal Access Token (PAT). التوكن يتم حفظه في متصفحك محلياً فقط (Local Storage) لإعطائك صلاحية النشر وإضافة الأدوات بأمان.
+              أدخل اسم مستخدم جيت هب والـ Personal Access Token (PAT). التوكن يتم حفظه في متصفحك محلياً لإعطائك صلاحية النشر، التعديل والتصويت بأمان.
             </p>
             <input id="github-username" type="text" placeholder="اسم المستخدم (Username)" style="width:100%; padding:.6rem; border:1px solid var(--border); border-radius:6px; margin-bottom:.5rem; background:white;" />
             <input id="github-token" type="password" placeholder="GitHub Personal Access Token" style="width:100%; padding:.6rem; border:1px solid var(--border); border-radius:6px; margin-bottom:1rem; background:white;" />
@@ -157,7 +164,7 @@
         <div class="profile-card">
           <div class="profile-avatar">P</div>
           <div class="profile-name">مستخدم زائر</div>
-          <div class="profile-bio">سجل دخولك عبر جيت هب لتتمكن من النشر ومشاركة أدواتك المصغرة مع الجميع ببلاش 100%.</div>
+          <div class="profile-bio">سجل دخولك لتتمكن من النشر، التعديل، الحذف، والتفاعل بالأصوات مع المنشورات بحرية.</div>
           <button class="subscribe-btn" onclick="openGithubModal()">تسجيل الدخول عبر GitHub</button>
         </div>
       `;
@@ -177,7 +184,7 @@
         const res = await fetch(`${GITHUB_API}/users/${username}`, {
           headers: { Authorization: `token ${token}` }
         });
-        if (!res.ok) throw new Error('بيانات غير صحيحة');
+        if (!res.ok) throw new Error();
         
         const userData = await res.json();
         localStorage.setItem('pulseGithubToken', token);
@@ -189,10 +196,10 @@
         closeGithubModal();
         renderGithubProfile(userData);
         fetchUserRepos();
-        fetchLiveFeed(); // إعادة تحميل الفيد فوراً بالتوكن الجديد
-        showToast(`مرحباً بك يا ${userData.name || userData.login} في Pulse ✨`);
+        fetchLiveFeed();
+        showToast(`مرحباً بك يا ${userData.name || userData.login} ✨`);
       } catch (err) {
-        showToast('تعذر تسجيل الدخول، تأكد من صحة التوكن واسم المستخدم');
+        showToast('تعذر تسجيل الدخول، تأكد من صحة البيانات');
       }
     }
 
@@ -202,8 +209,8 @@
       currentUser = null; githubToken = '';
       renderLoginCard();
       document.getElementById('tools-list').innerHTML = '';
-      fetchLiveFeed(); // لتحديث الفيد كزائر
-      showToast('تم تسجيل الخروج بنجاح');
+      fetchLiveFeed();
+      showToast('تم تسجيل الخروج');
     }
 
     function renderGithubProfile(user) {
@@ -212,7 +219,7 @@
           <img src="${user.avatar_url}" class="profile-avatar" style="object-fit:cover;" />
           <div class="profile-name">${user.name || user.login}</div>
           <div class="profile-handle">@${user.login}</div>
-          <div class="profile-bio">${user.bio || 'لا يوجد وصف مضاف للحساب الشخصي.'}</div>
+          <div class="profile-bio">${user.bio || 'لا يوجد وصف مضاف.'}</div>
           <div class="profile-stats">
             <div><div class="stat-number">${user.followers}</div><div class="stat-label">متابع</div></div>
             <div><div class="stat-number">${user.public_repos}</div><div class="stat-label">ريبو</div></div>
@@ -229,17 +236,39 @@
           <div style="font-weight:700; margin-bottom:1rem; font-size:1rem;">✍️ انشر مقالاً أو تحديثاً جديداً للجميع</div>
           <input id="post-title" type="text" placeholder="عنوان المنشور المميز..." style="width:100%; padding:.6rem; border:1px solid var(--border); border-radius:8px; margin-bottom:.5rem; background:white; font-family:'Cairo';" />
           <textarea id="post-content" placeholder="اكتب فكرتك أو مقالك هنا بالكامل..." style="width:100%; height:120px; padding:.6rem; border:1px solid var(--border); border-radius:8px; margin-bottom:1rem; background:white; font-family:'Cairo';"></textarea>
-          <button onclick="publishPost()" style="padding:.6rem 1.5rem; background:var(--ink); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-family:'Cairo'; text-align:center;">نشر فوري عبر جيت هب 🚀</button>
+          <button onclick="publishPost()" style="padding:.6rem 1.5rem; background:var(--ink); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-family:'Cairo';">نشر فوري عبر جيت هب 🚀</button>
         </div>
       `;
     }
 
+    // تسريع استجابة الواجهة (Optimistic UI) بدون تأخير جيت هب
     async function publishPost() {
       const title = document.getElementById('post-title').value.trim();
       const body = document.getElementById('post-content').value.trim();
 
       if (!title || !body) { showToast('برجاء كتابة عنوان ومحتوى البوست أولاً'); return; }
 
+      // 1. حقن المنشور في التايم لاين محلياً فوراً لمنع أي تأخير في تجربة المستخدم
+      const localPost = {
+        id: Date.now(), // مؤقت
+        number: null,
+        author: currentUser.login,
+        authorAvatar: currentUser.avatar_url,
+        date: new Date().toLocaleDateString('ar-EG'),
+        tag: 'جاري الحفظ...',
+        title: title,
+        excerpt: body,
+        votes: 0
+      };
+
+      cachedPosts.unshift(localPost);
+      renderDynamicFeed(cachedPosts);
+
+      document.getElementById('post-title').value = '';
+      document.getElementById('post-content').value = '';
+      showToast('تم النشر محلياً وجاري المزامنة مع المستودع... ⚡');
+
+      // 2. إرسال الطلب في الخلفية دون تعطيل واجهة المستخدم
       try {
         const res = await fetch(`${GITHUB_API}/repos/${PLATFORM_REPO}/issues`, {
           method: 'POST',
@@ -250,49 +279,47 @@
           body: JSON.stringify({ title, body })
         });
 
-        if (!res.ok) throw new Error('فشل النشر');
-
-        showToast('تم نشر موضوعك بنجاح وجاري إضافته للتايم لاين لايف! ✨');
-        document.getElementById('post-title').value = '';
-        document.getElementById('post-content').value = '';
-        setTimeout(fetchLiveFeed, 1000); // إعطاء جيت هب ثانية لجدولة الـ Issue الجديدة
+        if (!res.ok) throw new Error();
+        fetchLiveFeed(); // إعادة سحب الفيد الحقيقي من جيت هب لتحديث المعرفات (ID & Number)
       } catch (err) {
-        showToast('خطأ أثناء النشر، تأكد من تفعيل صلاحيات الـ Issues في التوكن الخاص بك');
+        showToast('خطأ أثناء المزامنة مع جيت هب، تأكد من تفعيل صلاحيات الـ Issues');
+        fetchLiveFeed(); // التراجع عن الحالة في حالة الفشل
       }
     }
 
     async function fetchLiveFeed() {
       try {
-        const headers = {};
-        if (githubToken) {
-          headers['Authorization'] = `token ${githubToken}`;
-        }
+        const headers = { 'Accept': 'application/vnd.github.v3+json' };
+        if (githubToken) headers['Authorization'] = `token ${githubToken}`;
 
         const res = await fetch(`${GITHUB_API}/repos/${PLATFORM_REPO}/issues?state=open&sort=created&direction=desc`, { headers });
         if (!res.ok) throw new Error();
         const issues = await res.json();
 
-        const posts = issues.filter(i => !i.pull_request).map(i => ({
-          id: i.id,
-          author: i.user.login,
-          authorAvatar: i.user.avatar_url,
-          date: new Date(i.created_at).toLocaleDateString('ar-EG'),
-          tag: 'منشور حي',
-          title: i.title,
-          excerpt: i.body || 'لا يوجد محتوى لهذا المنشور.'
-        }));
+        cachedPosts = issues.filter(i => !i.pull_request).map(i => {
+          // حساب رصيد التصويت البديل من جيت هب ريأكشنز (+1 ناقص -1)
+          const upvotes = i.reactions ? i.reactions['+1'] || 0 : 0;
+          const downvotes = i.reactions ? i.reactions['-1'] || 0 : 0;
+          
+          return {
+            id: i.id,
+            number: i.number,
+            author: i.user.login,
+            authorAvatar: i.user.avatar_url,
+            date: new Date(i.created_at).toLocaleDateString('ar-EG'),
+            tag: 'منشور حي',
+            title: i.title,
+            excerpt: i.body || 'لا يوجد محتوى.',
+            votes: upvotes - downvotes
+          };
+        });
 
-        renderDynamicFeed(posts);
+        renderDynamicFeed(cachedPosts);
       } catch (err) {
         document.getElementById('feed-container').innerHTML = `
           <div style="padding:1rem; background:#FEF2F2; border:1px solid #FCA5A5; color:#991B1B; border-radius:8px; font-size:0.85rem; line-height:1.6;">
-            ⚠️ <b>تعذر جلب البيانات الحية فوراً من المستودع</b><br>
-            جيت هب يتطلب تفعيل خاصية الـ Issues داخل المستودع المركزي الخاص بك للتمكن من استخدامه كقاعدة بيانات للمنشورات.<br><br>
-            <b>خطوات الحل الفوري في دقيقة:</b><br>
-            1. اذهب لصفحة ريبو المنصة عندك: <a href="https://github.com/${PLATFORM_REPO}/settings" target="_blank" style="text-decoration:underline; font-weight:bold;">GitHub Repo Settings</a><br>
-            2. في تبويب <b>General</b>، انزل لأسفل حتى تصل لجزء يسمى <b>Features</b>.<br>
-            3. قم بوضع علامة صح بجانب خيار <b>Issues</b> لتفعيلها.<br>
-            4. أعد تحديث (Refresh) هذه الصفحة وسيعمل كل شيء فوراً وبأقصى سرعة!
+            ⚠️ <b>تعذر جلب البيانات الحية</b><br>
+            تأكد من تفعيل صلاحية الـ Issues في مستودع المنصة المركزي <b>${PLATFORM_REPO}</b> من إعدادات حسابك على جيت هب.
           </div>`;
       }
     }
@@ -300,21 +327,132 @@
     function renderDynamicFeed(posts) {
       const container = document.getElementById('feed-container');
       if (posts.length === 0) {
-        container.innerHTML = '<p style="font-size:0.9rem; color:var(--ink-muted); text-align:center; padding:2rem 0;">لا توجد منشورات حية بعد، كن أول من ينشر في المنصة!</p>';
+        container.innerHTML = '<p style="font-size:0.9rem; color:var(--ink-muted); text-align:center; padding:2rem 0;">لا توجد منشورات حية بعد، كن أول من ينشر!</p>';
         return;
       }
-      container.innerHTML = posts.map(post => `
-        <div class="article-card">
-          <div class="article-meta">
-            <img src="${post.authorAvatar}" class="author-avatar" />
-            <span class="author-name">${post.author}</span>
-            <span class="article-date">${post.date}</span>
-            <span class="article-tag">${post.tag}</span>
+
+      container.innerHTML = posts.map(post => {
+        // التحقق مما إذا كان المستخدم الحالي هو كاتب البوست لتمكينه من التعديل والحذف
+        const isOwner = currentUser && currentUser.login === post.author;
+        
+        return `
+          <div class="article-card" id="post-card-${post.id}">
+            <div class="vote-panel">
+              <button class="vote-btn" onclick="handleVote(${post.number}, '+1', ${post.id})" title="سهم لأعلى (Upvote)">▲</button>
+              <span class="vote-count" id="vote-count-${post.id}">${post.votes}</span>
+              <button class="vote-btn" onclick="handleVote(${post.number}, '-1', ${post.id})" title="سهم لأسفل (Downvote)">▼</button>
+            </div>
+
+            <div class="article-content">
+              <div class="article-meta">
+                <img src="${post.authorAvatar}" class="author-avatar" />
+                <span class="author-name">${post.author}</span>
+                <span class="article-date">${post.date}</span>
+                <span class="article-tag">${post.tag}</span>
+              </div>
+              <div class="article-title" id="title-${post.id}">${post.title}</div>
+              <div class="article-excerpt" id="body-${post.id}">${post.excerpt}</div>
+              
+              <div style="display:flex; align-items:center; margin-top:0.5rem;">
+                ${isOwner && post.number ? `
+                  <button class="action-trigger" onclick="editPost(${post.number}, ${post.id})" style="color:var(--accent-sage);">✏️ تعديل</button>
+                  <button class="action-trigger" onclick="deletePost(${post.number}, ${post.id})" style="color:var(--accent-rust);">🗑️ حذف</button>
+                ` : ''}
+              </div>
+            </div>
           </div>
-          <div class="article-title">${post.title}</div>
-          <div class="article-excerpt">${post.excerpt}</div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
+    }
+
+    // هندسة التعديل (Edit) عبر جيت هب API
+    async function editPost(issueNumber, postId) {
+      if (!githubToken) return;
+      const oldTitle = document.getElementById(`title-${postId}`).textContent;
+      const oldBody = document.getElementById(`body-${postId}`).textContent;
+
+      const newTitle = prompt('تعديل عنوان المنشور:', oldTitle);
+      if (newTitle === null) return;
+      const newBody = prompt('تعديل محتوى المنشور:', oldBody);
+      if (newBody === null) return;
+
+      // التحديث الفوري على الشاشة للمستخدم (Optimistic Update)
+      document.getElementById(`title-${postId}`).textContent = newTitle;
+      document.getElementById(`body-${postId}`).textContent = newBody;
+
+      try {
+        const res = await fetch(`${GITHUB_API}/repos/${PLATFORM_REPO}/issues/${issueNumber}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `token ${githubToken}`
+          },
+          body: JSON.stringify({ title: newTitle, body: newBody })
+        });
+        if (!res.ok) throw new Error();
+        showToast('تم تحديث المنشور بنجاح على قاعدة البيانات جيت هب! ✏️');
+      } catch (err) {
+        showToast('فشل تعديل المنشور على السيرفر، جاري إرجاع البيانات...');
+        fetchLiveFeed();
+      }
+    }
+
+    // هندسة الحذف (Delete) الذكي عن طريق إغلاق الـ Issue برمجياً
+    async function deletePost(issueNumber, postId) {
+      if (!githubToken) return;
+      if (!confirm('هل أنت متأكد تماماً من حذف هذا المنشور نهائياً من التايم لاين؟')) return;
+
+      // إخفاء فوري من الشاشة أمام عين المستخدم
+      document.getElementById(`post-card-${postId}`).style.display = 'none';
+
+      try {
+        const res = await fetch(`${GITHUB_API}/repos/${PLATFORM_REPO}/issues/${issueNumber}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `token ${githubToken}`
+          },
+          body: JSON.stringify({ state: 'closed' })
+        });
+        if (!res.ok) throw new Error();
+        showToast('تم حذف المنشور وإغلاقه بنجاح 🗑️');
+      } catch (err) {
+        showToast('تعذر حذف المنشور من السيرفر');
+        fetchLiveFeed();
+      }
+    }
+
+    // ميزة التصويت على طريقة ريديت (Reddit Upvote / Downvote) باستخدام ريأكشنز جيت هب
+    async function handleVote(issueNumber, reactionType, postId) {
+      if (!githubToken) {
+        showToast('من فضلك سجل دخولك بحساب جيت هب لتتمكن من التصويت والتفاعل');
+        return;
+      }
+      if (!issueNumber) return;
+
+      // تحديث رقمي سريع محلي لعداد الواجهة
+      const counterEl = document.getElementById(`vote-count-${postId}`);
+      let currentVotes = parseInt(counterEl.textContent);
+      counterEl.textContent = reactionType === '+1' ? currentVotes + 1 : currentVotes - 1;
+
+      try {
+        const res = await fetch(`${GITHUB_API}/repos/${PLATFORM_REPO}/issues/${issueNumber}/reactions`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `token ${githubToken}`,
+            'Accept': 'application/vnd.github.squirrel-girl-preview+json', // هيدر مطلوب من جيت هب لتفعيل الريأكشنز
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ content: reactionType })
+        });
+
+        if (!res.ok) throw new Error();
+        showToast(reactionType === '+1' ? 'تم تسجيل Upvote بنجاح ▲' : 'تم تسجيل Downvote بنجاح ▼');
+      } catch (err) {
+        showToast('سجلت تفاعلك مسبقاً أو هناك مشكلة في الصلاحيات');
+        // تراجع عن التحديث الرقمي في حالة الفشل
+        counterEl.textContent = currentVotes;
+      }
     }
 
     async function fetchUserRepos() {
@@ -325,7 +463,6 @@
 
         const res = await fetch(`${GITHUB_API}/users/${currentUser.login}/repos?sort=updated`, { headers });
         const repos = await res.json();
-
         if(!Array.isArray(repos)) throw new Error();
 
         document.getElementById('tools-list').innerHTML = repos.slice(0, 5).map(repo => `
@@ -338,7 +475,7 @@
           </div>
         `).join('');
       } catch (err) { 
-        document.getElementById('tools-list').innerHTML = '<p style="font-size:0.8rem; color:var(--ink-faint);">تعذر جلب مستودعاتك الشخصية، تأكد من صلاحية التوكن.</p>';
+        document.getElementById('tools-list').innerHTML = '<p style="font-size:0.8rem; color:var(--ink-faint);">تعذر جلب مستودعاتك الشخصية.</p>';
       }
     }
 
@@ -360,7 +497,7 @@
         if (!res.ok) throw new Error();
         showToast(`تم تفعيل الـ Manifest وتحويل ${repoName} لأداة بنجاح! ✨`);
       } catch (err) {
-        showToast('تعذر حفظ الملف، تحقق من صلاحيات التوكن للريبو الشخصي');
+        showToast('تعذر حفظ الملف، تحقق من صلاحيات التوكن');
       }
     }
 
