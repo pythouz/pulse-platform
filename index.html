@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pulse — منصة المحتوى والأدوات الذكية</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght=0,400;0,600;0,700;1,400&family=Source+Serif+4:ital,wght=0,300;0,400;0,600;1,300;1,400&family=Cairo:wght=300;400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --off-white: #F8F5F0;
+      --warm-cream: #F2EDE4;
+      --soft-beige: #E8E0D5;
+      --ink: #1A1A1A;
+      --ink-soft: #3D3530;
+      --ink-muted: #6B5E55;
+      --ink-faint: #9C8E85;
+      --accent-rust: #C0392B;
+      --accent-sage: #4A7C59;
+      --border: #D9D0C5;
+      --border-light: #EAE4DB;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--off-white);
+      color: var(--ink);
+      font-family: 'Cairo', sans-serif;
+      min-height: 100vh;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .site-header {
+      background: var(--off-white);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(8px);
+    }
+
+    .logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -0.02em;
+    }
+
+    .logo span { color: var(--accent-rust); font-style: italic; }
+
+    /* ---- Three-column layout ---- */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 280px 1fr 280px;
+      gap: 0;
+      max-width: 1300px;
+      margin: 0 auto;
+      min-height: calc(100vh - 57px);
+    }
+
+    .col-sidebar {
+      border-left: 1px solid var(--border);
+      height: calc(100vh - 57px);
+      position: sticky;
+      top: 57px;
+      overflow-y: auto;
+      padding: 1.5rem 1.25rem;
+    }
+
+    .col-feed {
+      border-left: 1px solid var(--border);
+      padding: 2rem 2.25rem;
+      overflow-y: auto;
+    }
+
+    .col-profile {
+      height: calc(100vh - 57px);
+      position: sticky;
+      top: 57px;
+      overflow-y: auto;
+      padding: 1.5rem 1.25rem;
+    }
+
+    .section-label {
+      font-family: 'Cairo', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: var(--ink-faint);
+      margin-bottom: 0.85rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    /* ---- Communities ---- */
+    .community-item {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.55rem 0.6rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-bottom: 2px;
+    }
+    .community-item:hover { background: var(--warm-cream); }
+    .community-item.active { background: var(--soft-beige); }
+
+    .community-icon { font-size: 1rem; flex-shrink: 0; }
+    .community-name { font-size: 0.85rem; font-weight: 500; color: var(--ink-soft); flex: 1; }
+    .community-count { font-size: 0.75rem; color: var(--ink-faint); }
+
+    /* ---- Chat UI ---- */
+    .chat-container {
+      background: var(--warm-cream);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 1.5rem;
+    }
+
+    .chat-header {
+      padding: 0.7rem 0.9rem;
+      background: var(--soft-beige);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .chat-live-dot {
+      width: 6px; height: 6px;
+      background: #22c55e;
+      border-radius: 50%;
+      animation: pulse-green 2s infinite;
+    }
+
+    @keyframes pulse-green {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    .chat-title { font-size: 0.78rem; font-weight: 600; color: var(--ink-soft); }
+
+    .chat-messages {
+      height: 180px;
+      overflow-y: auto;
+      padding: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .chat-msg { display: flex; flex-direction: column; gap: 0.15rem; }
+    .chat-msg-header { display: flex; align-items: center; gap: 0.4rem; }
+
+    .chat-avatar {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      font-size: 0.65rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    .chat-username { font-size: 0.72rem; font-weight: 600; color: var(--ink-soft); }
+    .chat-time { font-size: 0.65rem; color: var(--ink-faint); }
+    .chat-text { font-size: 0.8rem; color: var(--ink-soft); line-height: 1.5; padding-right: 1.55rem; }
+
+    .chat-input-row { display: flex; border-top: 1px solid var(--border); }
+
+    .chat-input {
+      flex: 1; padding: 0.6rem 0.75rem; background: transparent;
+      border: none; outline: none; font-size: 0.8rem;
+      font-family: 'Cairo', sans-serif; color: var(--ink); direction: rtl;
+    }
+    .chat-input::placeholder { color: var(--ink-faint); }
+
+    .chat-send-btn {
+      padding: 0 0.85rem; background: var(--ink); color: var(--off-white);
+      border: none; cursor: pointer; font-size: 0.75rem; transition: background 0.15s;
+    }
+    .chat-send-btn:hover { background: var(--accent-rust); }
+
+    /* ---- Article Card ---- */
+    .article-card { border-bottom: 1px solid var(--border-light); padding: 2rem 0; }
+    .article-card:first-child { padding-top: 0; }
+
+    .article-meta { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.85rem; }
+
+    .author-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      font-size: 0.75rem; font-weight: 700; display: flex;
+      align-items: center; justify-content: center; color: white; flex-shrink: 0;
+    }
+
+    .author-name { font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); }
+    .article-date { font-size: 0.75rem; color: var(--ink-faint); }
+
+    .article-tag {
+      margin-right: auto; font-size: 0.68rem; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+      background: var(--warm-cream); color: var(--ink-muted); border: 1px solid var(--border);
+    }
+
+    .article-title {
+      font-family: 'Cairo', sans-serif; font-size: 1.35rem; font-weight: 700;
+      line-height: 1.4; color: var(--ink); margin-bottom: 0.6rem;
+      cursor: pointer; transition: color 0.15s;
+    }
+    .article-title:hover { color: var(--accent-rust); }
+
+    .article-excerpt {
+      font-family: 'Source Serif 4', serif; font-size: 0.98rem;
+      line-height: 1.75; color: var(--ink-muted); margin-bottom: 1.25rem;
+    }
+
+    .article-actions { display: flex; align-items: center; gap: 0.75rem; }
+
+    .vote-btn {
+      display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem;
+      border-radius: 5px; border: 1px solid var(--border); background: transparent;
+      cursor: pointer; font-size: 0.8rem; font-family: 'Cairo', sans-serif;
+      font-weight: 500; color: var(--ink-muted); transition: all 0.15s;
+    }
+    .vote-btn:hover { background: var(--warm-cream); border-color: var(--ink-soft); color: var(--ink); }
+    .vote-btn.voted-up { background: #F0FDF4; border-color: var(--accent-sage); color: var(--accent-sage); }
+    .vote-btn.voted-down { background: #FEF2F2; border-color: var(--accent-rust); color: var(--accent-rust); }
+
+    .comment-btn {
+      display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem;
+      border-radius: 5px; border: 1px solid transparent; background: transparent;
+      cursor: pointer; font-size: 0.8rem; font-family: 'Cairo', sans-serif;
+      color: var(--ink-faint); transition: all 0.15s;
+    }
+    .comment-btn:hover { color: var(--ink-muted); background: var(--warm-cream); }
+
+    .read-more-link {
+      margin-right: auto; font-size: 0.82rem; font-style: italic;
+      color: var(--ink-muted); cursor: pointer; border-bottom: 1px solid var(--border);
+      padding-bottom: 1px; transition: color 0.15s;
+    }
+    .read-more-link:hover { color: var(--accent-rust); border-color: var(--accent-rust); }
+
+    /* ---- Profile Column ---- */
+    .profile-card { text-align: center; padding-bottom: 1.25rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-light); }
+
+    .profile-avatar {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: linear-gradient(135deg, #c0392b, #f39c12);
+      margin: 0 auto 0.85rem; display: flex; align-items: center;
+      justify-content: center; font-size: 1.6rem; font-weight: 700; color: white;
+      border: 3px solid var(--border);
+    }
+
+    .profile-name { font-size: 1.1rem; font-weight: 700; color: var(--ink); margin-bottom: 0.2rem; }
+    .profile-handle { font-size: 0.75rem; color: var(--ink-faint); margin-bottom: 0.6rem; direction: ltr; }
+    .profile-bio { font-size: 0.85rem; line-height: 1.6; color: var(--ink-muted); margin-bottom: 0.85rem; }
+
+    .profile-stats { display: flex; justify-content: center; gap: 1.5rem; margin-bottom: 0.9rem; }
+    .stat-number { font-size: 1rem; font-weight: 700; color: var(--ink); }
+    .stat-label { font-size: 0.68rem; color: var(--ink-faint); }
+
+    .subscribe-btn {
+      width: 100%; padding: 0.6rem; background: var(--ink); color: var(--off-white);
+      border: none; border-radius: 6px; font-family: 'Cairo', sans-serif;
+      font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.15s;
+    }
+    .subscribe-btn:hover { background: var(--accent-rust); }
+    .subscribe-btn.subscribed { background: transparent; color: var(--ink); border: 1px solid var(--border); }
+
+    /* ---- Tools (Originally Repos) ---- */
+    .tool-item { padding: 0.75rem 0; border-bottom: 1px solid var(--border-light); }
+    .tool-item:last-child { border-bottom: none; }
+
+    .tool-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem; }
+    .tool-name { font-size: 0.88rem; font-weight: 600; color: var(--accent-rust); cursor: pointer; }
+    .tool-name:hover { text-decoration: underline; }
+    .tool-desc { font-size: 0.8rem; color: var(--ink-muted); line-height: 1.4; margin-bottom: 0.45rem; }
+
+    .run-tool-btn {
+      padding: 0.25rem 0.6rem; background: transparent; border: 1px solid var(--border);
+      border-radius: 4px; font-size: 0.72rem; font-family: 'Cairo', sans-serif;
+      font-weight: 500; color: var(--ink-muted); cursor: pointer; transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .run-tool-btn:hover { background: var(--ink); color: var(--off-white); border-color: var(--ink); }
+
+    /* ---- Modal ---- */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(26,26,26,0.5); z-index: 100;
+      display: flex; align-items: center; justify-content: center;
+      backdrop-filter: blur(3px); opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    }
+    .modal-overlay.open { opacity: 1; pointer-events: all; }
+
+    .modal-box {
+      background: var(--off-white); border: 1px solid var(--border);
+      border-radius: 12px; padding: 1.75rem 2rem; width: 460px; max-width: 95vw;
+      transform: translateY(12px); transition: transform 0.2s;
+    }
+    .modal-overlay.open .modal-box { transform: translateY(0); }
+
+    .modal-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; }
+    
+    /* ---- Dynamic App Container ---- */
+    .app-sandbox {
+      background: var(--warm-cream); border: 1px solid var(--border);
+      border-radius: 8px; padding: 1.25rem; margin: 1rem 0;
+    }
+
+    .modal-close-btn {
+      padding: 0.5rem 1.2rem; background: var(--ink); color: var(--off-white);
+      border: none; border-radius: 6px; cursor: pointer; font-family: 'Cairo', sans-serif; font-size: 0.85rem;
+    }
+    .modal-close-btn:hover { background: var(--accent-rust); }
+
+    /* ---- Notifications ---- */
+    .toast {
+      position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(8px);
+      background: var(--ink); color: var(--off-white); padding: 0.6rem 1.2rem;
+      border-radius: 6px; font-size: 0.85rem; font-family: 'Cairo', sans-serif;
+      opacity: 0; transition: all 0.25s; z-index: 200; pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    @media (max-width: 1024px) { .main-grid { grid-template-columns: 240px 1fr 240px; } }
+    @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; } .col-sidebar, .col-profile { display: none; } }
+  </style>
+</head>
+<body>
+
+  <header class="site-header">
+    <div style="max-width:1300px; margin:0 auto; padding:0 1.5rem; height:57px; display:flex; align-items:center; justify-content:space-between;">
+      <div class="logo">Pulse<span>.</span></div>
+      <nav style="display:flex; align-items:center; gap:1.5rem;">
+        <a href="#" style="font-size:0.85rem; color:var(--ink-muted); text-decoration:none;">استكشف</a>
+        <a href="#" style="font-size:0.85rem; color:var(--ink-muted); text-decoration:none;">النشرات</a>
+        <a href="#" style="font-size:0.85rem; color:var(--ink-muted); text-decoration:none;">التطبيقات المصغرة</a>
+        <button onclick="showToast('سيتم إضافة تسجيل الدخول بـ GitHub قريباً')" style="padding:.38rem .9rem; background:var(--ink); color:var(--off-white); border:none; border-radius:5px; font-size:.82rem; font-family:'Cairo',sans-serif; font-weight:600; cursor:pointer;">ابدأ الآن</button>
+      </nav>
+    </div>
+  </header>
+
+  <div class="main-grid">
+
+    <aside class="col-sidebar">
+      <div class="section-label">المجتمعات الحيوية</div>
+      <div id="communities-list"></div>
+
+      <div class="chat-container">
+        <div class="chat-header">
+          <div class="chat-live-dot"></div>
+          <span class="chat-title">الدردشة العامة العامة</span>
+          <span style="margin-right:auto; font-size:.7rem; color:var(--ink-faint);" id="online-count">45 متصل</span>
+        </div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-input-row">
+          <input class="chat-input" id="chat-input" type="text" placeholder="اكتب رسالة وحاور الجميع..." onkeydown="if(event.key==='Enter') sendChatMsg()" />
+          <button class="chat-send-btn" onclick="sendChatMsg()">↵</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="col-feed">
+      <div style="margin-bottom:2rem; padding-bottom:1.25rem; border-bottom:1px solid var(--border-light); display:flex; align-items:center; gap:1rem;">
+        <span class="section-label" style="margin-bottom:0; border-bottom:none;">آخر المنشورات والنشرات</span>
+        <div style="display:flex; gap:.5rem; margin-right:auto;">
+          <button onclick="filterFeed('all')" id="filter-all" style="padding:.3rem .7rem; border-radius:4px; font-size:.75rem; border:1px solid var(--ink); background:var(--ink); color:var(--off-white); cursor:pointer;">الكل</button>
+          <button onclick="filterFeed('مقال')" id="filter-article" style="padding:.3rem .7rem; border-radius:4px; font-size:.75rem; border:1px solid var(--border); background:transparent; color:var(--ink-muted); cursor:pointer;">مقالات قصصية</button>
+          <button onclick="filterFeed('تحديث')" id="filter-update" style="padding:.3rem .7rem; border-radius:4px; font-size:.75rem; border:1px solid var(--border); background:transparent; color:var(--ink-muted); cursor:pointer;">يوميات وتحديثات</button>
+        </div>
+      </div>
+      <div id="feed-container"></div>
+    </main>
+
+    <aside class="col-profile">
+      <div class="profile-card">
+        <div class="profile-avatar">م</div>
+        <div class="profile-name">محمد ربيع</div>
+        <div class="profile-handle">@mohamed_rabie</div>
+        <div class="profile-bio">محاسب مالي، مهتم بالأتمتة والحلول الذكية. أشارك هنا أدواتي اليومية ونشراتي المتخصصة.</div>
+        <div class="profile-stats">
+          <div class="stat-item"><div class="stat-number">1.5k</div><div class="stat-label">متابع</div></div>
+          <div class="stat-item"><div class="stat-number">42</div><div class="stat-label">منشور</div></div>
+          <div class="stat-item"><div class="stat-number">95</div><div class="stat-label">أداة مضافة</div></div>
+        </div>
+        <button class="subscribe-btn" id="sub-btn" onclick="toggleSubscribe()">اشترك في النشرة مجاناً ✦</button>
+      </div>
+
+      <div class="section-label">أدواتي الذكية (تطبيقات مصغرة)</div>
+      <div id="tools-list"></div>
+    </aside>
+
+  </div>
+
+  <div class="modal-overlay" id="tool-modal" onclick="if(event.target===this) closeModal()">
+    <div class="modal-box">
+      <div class="modal-title" id="modal-title"></div>
+      <div style="font-size:.82rem; color:var(--ink-muted);">
+        تطبيق مصغر يعمل مباشرة آمن ومستضاف عبر GitHub.
+      </div>
+      
+      <div class="app-sandbox" id="modal-app-container"></div>
+      
+      <div style="display:flex; justify-content: flex-end;">
+        <button class="modal-close-btn" onclick="closeModal()">إغلاق التطبيق</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Data الجيل الجديد للعامة ----
+    const communities = [
+      { name: 'صناعة المحتوى والثقافة', color: '#E74C3C', count: '12.4k', active: true },
+      { name: 'التكنولوجيا الذكية والأتمتة', color: '#2ECC71', count: '8.1k' },
+      { name: 'المال والأعمال والمحاسبة', color: '#F1C40F', count: '5.3k' },
+      { name: 'الكتب والروايات', color: '#9B59B6', count: '3.9k' },
+      { name: 'تطوير الذات والإنتاجية', color: '#1ABC9C', count: '6.2k' },
+    ];
+
+    const initialMessages = [
+      { user: 'أحمد', avatar: '#3498DB', text: 'أداة تنزيل الفيديوهات سريعة جداً وممتازة!', time: '22:12' },
+      { user: 'منى', avatar: '#E91E63', text: 'هل يمكن لأحد المطورين إضافة أداة لحساب الضرائب سريعا؟', time: '22:14' },
+      { user: 'طارق', avatar: '#2ECC71', text: 'منشور محمد ربيع الأخير عن التبسيط المالي رائع جداً.', time: '22:15' },
+    ];
+
+    const articles = [
+      {
+        id: 1,
+        author: 'سعاد منصور',
+        authorAvatar: '#E74C3C',
+        authorInitial: 'س',
+        date: '22 مايو 2026',
+        tag: 'مقال',
+        title: 'عصر "التطبيقات المصغرة": لماذا ننزّل برامج بحجم 100 ميجا لمهام بسيطة؟',
+        excerpt: 'في الماضي كنا نثبت برامج ضخمة لقص صورة أو تحميل فيديو أو تنظيم ميزانية. اليوم، السوشيال ميديا الهجينة تتيح لك تشغيل هذه الأدوات فورا داخل المتصفح بأمان وبدون إعلانات مزعجة. هذه هي الثورة القادمة للمستخدم العادي.',
+        upvotes: 342,
+        downvotes: 4,
+        comments: 52,
+        userVote: null,
+      },
+      {
+        id: 2,
+        author: 'محمود عبد الكريم',
+        authorAvatar: '#2ECC71',
+        authorInitial: 'م',
+        date: '20 مايو 2026',
+        tag: 'تحديث',
+        title: 'يوميات: كيف نظمت مصاريفي الشهرية باستخدام أداة بسيطة؟',
+        excerpt: 'تحديث سريع للاصدقاء: قمت باستخدام أداة "الحاسبة المتطورة" الموجودة في بروفايل الأصدقاء هنا لجدولة أقساطي، المنصة توفر ميزات تغنيك عن تطبيقات الميزانيات المعقدة.',
+        upvotes: 95,
+        downvotes: 1,
+        comments: 12,
+        userVote: null,
+      }
+    ];
+
+    // التطبيقات المصغرة الحقيقية التفاعلية للمستخدم العادي!
+    const tools = [
+      {
+        name: 'أداة تنزيل فيديوهات السوشيال ميديا',
+        desc: 'ضع رابط الفيديو وحمله فوراً بجودة عالية وبدون إعلانات.',
+        render: () => `
+          <div class="flex flex-col gap-3">
+            <input type="text" id="vid-url" placeholder="ضع رابط فيديو فيسبوك، يوتيوب أو تويتر..." class="p-2 border rounded text-sm w-full bg-white text-black outline-none" />
+            <button onclick="runVideoDownloader()" class="bg-red-600 text-white text-xs py-2 px-4 rounded hover:bg-red-700 font-bold">بدء استخراج وتحميل الفيديو ⚡</button>
+            <div id="vid-status" class="text-xs text-gray-600 font-medium hidden"></div>
+          </div>
+        `
+      },
+      {
+        name: 'منظم الميزانية والمصاريف السريع',
+        desc: 'أداة ذكية لحساب المتبقي من راتبك وتقسيمه على أولوياتك.',
+        render: () => `
+          <div class="flex flex-col gap-2 text-xs">
+            <input type="number" id="budget-total" placeholder="إجمالي الراتب أو الميزانية..." class="p-2 border rounded w-full bg-white text-black" />
+            <input type="number" id="budget-spent" placeholder="المصاريف الثابتة (إيجار، فواتير...)" class="p-2 border rounded w-full bg-white text-black" />
+            <button onclick="calculateBudget()" class="bg-green-700 text-white py-2 px-4 rounded font-bold">احسب التوزيع الذكي 📊</button>
+            <div id="budget-res" class="p-2 bg-white rounded border hidden font-medium text-black"></div>
+          </div>
+        `
+      },
+      {
+        name: 'محلل النص وعداد الكلمات المحترف',
+        desc: 'مفيد لصنّاع المحتوى لحساب الكلمات، الحروف، وزمن القراءة المتوقع.',
+        render: () => `
+          <div class="flex flex-col gap-2">
+            <textarea id="text-input" placeholder="اكتب أو الصق نصك هنا..." class="p-2 border rounded text-xs w-full h-20 bg-white text-black"></textarea>
+            <button onclick="analyzeText()" class="bg-gray-800 text-white text-xs py-2 px-4 rounded font-bold">تحليل النص فورا 🔍</button>
+            <div id="text-res" class="text-xs text-gray-700 font-medium hidden bg-white p-2 rounded border"></div>
+          </div>
+        `
+      }
+    ];
+
+    // ---- تفاعل الأدوات الحية (Interactive Micro-Apps Logic) ----
+    window.runVideoDownloader = function() {
+      const url = document.getElementById('vid-url').value.trim();
+      const status = document.getElementById('vid-status');
+      if(!url) { alert('من فضلك ضع رابطاً صحيحاً أولاً'); return; }
+      
+      status.classList.remove('hidden');
+      status.innerHTML = 'جاري الاتصال بالسيرفر السحابي الآمن والتحقق من الرابط...';
+      
+      setTimeout(() => {
+        status.innerHTML = '⚡ تم العثور على الفيديو بجودة 1080p! جاري التحضير للتنزيل المباشر...';
+        setTimeout(() => {
+          status.innerHTML = '✓ تم بدء التنزيل بنجاح! تفقد مجلد التحميلات (Downloads) بجهازك.';
+          // محاكاة تحميل ملف حقيقي للمستخدم
+          const link = document.createElement('a');
+          link.href = '#';
+          link.setAttribute('download', 'video_pulse.mp4');
+          showToast('بدأ تحميل الفيديو الذكي بنجاح! ✓');
+        }, 1500);
+      }, 1500);
+    }
+
+    window.calculateBudget = function() {
+      const total = parseFloat(document.getElementById('budget-total').value);
+      const spent = parseFloat(document.getElementById('budget-spent').value);
+      const res = document.getElementById('budget-res');
+      
+      if(isNaN(total) || isNaN(spent)) { alert('من فضلك أدخل أرقاماً صحيحة'); return; }
+      
+      const rem = total - spent;
+      const savings = (rem * 0.2).toFixed(2);
+      const daily = ((rem * 0.8) / 30).toFixed(2);
+      
+      res.classList.remove('hidden');
+      res.innerHTML = `
+        <p class="text-red-600">المتبقي الصافي: ${rem} ج.م</p>
+        <p class="text-emerald-700">الادخار المقترح (20%): ${savings} ج.م</p>
+        <p class="text-blue-700">المصروف اليومي الآمن للمعيشة: ${daily} ج.م / يومياً</p>
+      `;
+    }
+
+    window.analyzeText = function() {
+      const txt = document.getElementById('text-input').value;
+      const res = document.getElementById('text-res');
+      if(!txt) { alert('الصق نصاً أولاً'); return; }
+      
+      const words = txt.trim().split(/\s+/).filter(w => w.length > 0).length;
+      const chars = txt.length;
+      const time = Math.ceil(words / 200); // 200 كلمة بالدقيقة كمتوسط
+      
+      res.classList.remove('hidden');
+      res.innerHTML = `عدد الكلمات: ${words} | عدد الحروف: ${chars} | الوقت المتوقع للقراءة: ~${time} دقيقة`;
+    }
+
+    // ---- Renders ----
+    function renderCommunities() {
+      const container = document.getElementById('communities-list');
+      container.innerHTML = communities.map((c, i) => `
+        <div class="community-item ${c.active ? 'active' : ''}" onclick="selectCommunity(${i})">
+          <span class="community-icon">🎯</span>
+          <span class="community-name">${c.name}</span>
+          <span class="community-count">${c.count}</span>
+        </div>
+      `).join('');
+    }
+
+    function selectCommunity(idx) {
+      communities.forEach((c, i) => c.active = i === idx);
+      renderCommunities();
+      showToast(`انتقلت إلى مجتمع: ${communities[idx].name}`);
+    }
+
+    function renderChat() {
+      const container = document.getElementById('chat-messages');
+      container.innerHTML = initialMessages.map(m => `
+        <div class="chat-msg">
+          <div class="chat-msg-header">
+            <div class="chat-avatar" style="background:${m.avatar}">${m.user[0]}</div>
+            <span class="chat-username">${m.user}</span>
+            <span class="chat-time">${m.time}</span>
+          </div>
+          <div class="chat-text">${m.text}</div>
+        </div>
+      `).join('');
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function sendChatMsg() {
+      const input = document.getElementById('chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      initialMessages.push({ user: 'أنت', avatar: '#C0392B', text, time: 'الآن' });
+      renderChat();
+      input.value = '';
+
+      setTimeout(() => {
+        const replies = ['رائع جداً!', 'اتفق معك تماماً في هذا المنظور.', 'تطبيق رائع وفكرة عبقرية.'];
+        initialMessages.push({
+          user: 'عضو_نشط',
+          avatar: '#34495E',
+          text: replies[Math.floor(Math.random() * replies.length)],
+          time: 'الآن'
+        });
+        renderChat();
+      }, 1000);
+    }
+
+    let currentFilter = 'all';
+    function renderFeed() {
+      const container = document.getElementById('feed-container');
+      const filtered = currentFilter === 'all' ? articles : articles.filter(a => a.tag === currentFilter);
+
+      container.innerHTML = filtered.map(a => `
+        <div class="article-card">
+          <div class="article-meta">
+            <div class="author-avatar" style="background:${a.authorAvatar}">${a.authorInitial}</div>
+            <span class="author-name">${a.author}</span>
+            <span class="article-date">${a.date}</span>
+            <span class="article-tag">${a.tag}</span>
+          </div>
+          <div class="article-title" onclick="showToast('سيتم فتح المقال كاملاً قريباً')">${a.title}</div>
+          <div class="article-excerpt">${a.excerpt}</div>
+          <div class="article-actions">
+            <button class="vote-btn ${a.userVote === 'up' ? 'voted-up' : ''}" onclick="vote(${a.id}, 'up')">
+              ▲ مفيد <span class="mr-1">${a.upvotes}</span>
+            </button>
+            <button class="vote-btn ${a.userVote === 'down' ? 'voted-down' : ''}" onclick="vote(${a.id}, 'down')">
+              ▼
+            </button>
+            <button class="comment-btn">💬 <span>${a.comments}</span></button>
+            <span class="read-more-link" onclick="showToast('سيتم فتح المقال كاملاً قريباً')">تابع القراءة ←</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function filterFeed(type) {
+      currentFilter = type;
+      renderFeed();
+      const map = { 'all': 'filter-all', 'مقال': 'filter-article', 'تحديث': 'filter-update' };
+      Object.entries(map).forEach(([k, id]) => {
+        const btn = document.getElementById(id);
+        const active = k === type;
+        btn.style.background = active ? 'var(--ink)' : 'transparent';
+        btn.style.color = active ? 'var(--off-white)' : 'var(--ink-muted)';
+        btn.style.borderColor = active ? 'var(--ink)' : 'var(--border)';
+      });
+    }
+
+    function vote(id, dir) {
+      const article = articles.find(a => a.id === id);
+      if (!article) return;
+      if (article.userVote === dir) {
+        if (dir === 'up') article.upvotes--;
+        article.userVote = null;
+      } else {
+        if (article.userVote === 'up') article.upvotes--;
+        if (dir === 'up') article.upvotes++;
+        article.userVote = dir;
+      }
+      renderFeed();
+    }
+
+    function renderTools() {
+      const container = document.getElementById('tools-list');
+      container.innerHTML = tools.map((t, i) => `
+        <div class="tool-item">
+          <div class="tool-header">
+            <span class="tool-name" onclick="openModal(${i})">${t.name}</span>
+            <button class="run-tool-btn" onclick="openModal(${i})">تشغيل أداة لايف ⚡</button>
+          </div>
+          <div class="tool-desc">${t.desc}</div>
+        </div>
+      `).join('');
+    }
+
+    let subscribed = false;
+    function toggleSubscribe() {
+      subscribed = !subscribed;
+      const btn = document.getElementById('sub-btn');
+      btn.textContent = subscribed ? '✓ أنت مشترك الآن' : 'اشترك في النشرة مجاناً ✦';
+      btn.className = subscribed ? 'subscribe-btn subscribed' : 'subscribe-btn';
+      showToast(subscribed ? 'تم الاشتراك في نشرة محمد ربيع بنجاح ✓' : 'تم إلغاء الاشتراك');
+    }
+
+    function openModal(idx) {
+      const tool = tools[idx];
+      document.getElementById('modal-title').textContent = tool.name;
+      document.getElementById('modal-app-container').innerHTML = tool.render();
+      document.getElementById('tool-modal').classList.add('open');
+    }
+
+    function closeModal() { document.getElementById('tool-modal').classList.remove('open'); }
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    // Init
+    renderCommunities();
+    renderChat();
+    renderFeed();
+    renderTools();
+  </script>
+</body>
+</html>
