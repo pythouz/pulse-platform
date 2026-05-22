@@ -106,7 +106,7 @@
     </main>
 
     <aside class="col-profile">
-      </aside>
+    </aside>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -156,7 +156,7 @@
       document.getElementById('dynamic-profile-root').innerHTML = `
         <div class="profile-card">
           <div class="profile-avatar">P</div>
-          <div class="profile-name">مستحدم زائر</div>
+          <div class="profile-name">مستخدم زائر</div>
           <div class="profile-bio">سجل دخولك عبر جيت هب لتتمكن من النشر ومشاركة أدواتك المصغرة مع الجميع ببلاش 100%.</div>
           <button class="subscribe-btn" onclick="openGithubModal()">تسجيل الدخول عبر GitHub</button>
         </div>
@@ -189,6 +189,7 @@
         closeGithubModal();
         renderGithubProfile(userData);
         fetchUserRepos();
+        fetchLiveFeed(); // إعادة تحميل الفيد فوراً بالتوكن الجديد
         showToast(`مرحباً بك يا ${userData.name || userData.login} في Pulse ✨`);
       } catch (err) {
         showToast('تعذر تسجيل الدخول، تأكد من صحة التوكن واسم المستخدم');
@@ -201,6 +202,7 @@
       currentUser = null; githubToken = '';
       renderLoginCard();
       document.getElementById('tools-list').innerHTML = '';
+      fetchLiveFeed(); // لتحديث الفيد كزائر
       showToast('تم تسجيل الخروج بنجاح');
     }
 
@@ -226,7 +228,7 @@
         <div style="background:var(--warm-cream); border:1px solid var(--border); border-radius:12px; padding:1.25rem; margin-bottom:2rem;">
           <div style="font-weight:700; margin-bottom:1rem; font-size:1rem;">✍️ انشر مقالاً أو تحديثاً جديداً للجميع</div>
           <input id="post-title" type="text" placeholder="عنوان المنشور المميز..." style="width:100%; padding:.6rem; border:1px solid var(--border); border-radius:8px; margin-bottom:.5rem; background:white; font-family:'Cairo';" />
-          <textarea id="post-content" placeholder="اكتب فكرتك أو مقالك هنا بالكامل (يدعم صيغة الـ Markdown)..." style="width:100%; height:120px; padding:.6rem; border:1px solid var(--border); border-radius:8px; margin-bottom:1rem; background:white; font-family:'Cairo';"></textarea>
+          <textarea id="post-content" placeholder="اكتب فكرتك أو مقالك هنا بالكامل..." style="width:100%; height:120px; padding:.6rem; border:1px solid var(--border); border-radius:8px; margin-bottom:1rem; background:white; font-family:'Cairo';"></textarea>
           <button onclick="publishPost()" style="padding:.6rem 1.5rem; background:var(--ink); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-family:'Cairo'; text-align:center;">نشر فوري عبر جيت هب 🚀</button>
         </div>
       `;
@@ -253,7 +255,7 @@
         showToast('تم نشر موضوعك بنجاح وجاري إضافته للتايم لاين لايف! ✨');
         document.getElementById('post-title').value = '';
         document.getElementById('post-content').value = '';
-        fetchLiveFeed();
+        setTimeout(fetchLiveFeed, 1000); // إعطاء جيت هب ثانية لجدولة الـ Issue الجديدة
       } catch (err) {
         showToast('خطأ أثناء النشر، تأكد من تفعيل صلاحيات الـ Issues في التوكن الخاص بك');
       }
@@ -261,7 +263,12 @@
 
     async function fetchLiveFeed() {
       try {
-        const res = await fetch(`${GITHUB_API}/repos/${PLATFORM_REPO}/issues?state=open&sort=created`);
+        const headers = {};
+        if (githubToken) {
+          headers['Authorization'] = `token ${githubToken}`;
+        }
+
+        const res = await fetch(`${GITHUB_API}/repos/${PLATFORM_REPO}/issues?state=open&sort=created&direction=desc`, { headers });
         if (!res.ok) throw new Error();
         const issues = await res.json();
 
@@ -277,14 +284,23 @@
 
         renderDynamicFeed(posts);
       } catch (err) {
-        document.getElementById('feed-container').innerHTML = 'تعذر جلب البيانات الحية، تأكد من صحة اسم ريبو المنصة في الكود.';
+        document.getElementById('feed-container').innerHTML = `
+          <div style="padding:1rem; background:#FEF2F2; border:1px solid #FCA5A5; color:#991B1B; border-radius:8px; font-size:0.85rem; line-height:1.6;">
+            ⚠️ <b>تعذر جلب البيانات الحية فوراً من المستودع</b><br>
+            جيت هب يتطلب تفعيل خاصية الـ Issues داخل المستودع المركزي الخاص بك للتمكن من استخدامه كقاعدة بيانات للمنشورات.<br><br>
+            <b>خطوات الحل الفوري في دقيقة:</b><br>
+            1. اذهب لصفحة ريبو المنصة عندك: <a href="https://github.com/${PLATFORM_REPO}/settings" target="_blank" style="text-decoration:underline; font-weight:bold;">GitHub Repo Settings</a><br>
+            2. في تبويب <b>General</b>، انزل لأسفل حتى تصل لجزء يسمى <b>Features</b>.<br>
+            3. قم بوضع علامة صح بجانب خيار <b>Issues</b> لتفعيلها.<br>
+            4. أعد تحديث (Refresh) هذه الصفحة وسيعمل كل شيء فوراً وبأقصى سرعة!
+          </div>`;
       }
     }
 
     function renderDynamicFeed(posts) {
       const container = document.getElementById('feed-container');
       if (posts.length === 0) {
-        container.innerHTML = '<p style="font-size:0.9rem; color:var(--ink-muted);">لا توجد منشورات منشورة بعد، كن أول من ينشر!</p>';
+        container.innerHTML = '<p style="font-size:0.9rem; color:var(--ink-muted); text-align:center; padding:2rem 0;">لا توجد منشورات حية بعد، كن أول من ينشر في المنصة!</p>';
         return;
       }
       container.innerHTML = posts.map(post => `
@@ -304,8 +320,13 @@
     async function fetchUserRepos() {
       if (!currentUser) return;
       try {
-        const res = await fetch(`${GITHUB_API}/users/${currentUser.login}/repos?sort=updated`);
+        const headers = {};
+        if (githubToken) headers['Authorization'] = `token ${githubToken}`;
+
+        const res = await fetch(`${GITHUB_API}/users/${currentUser.login}/repos?sort=updated`, { headers });
         const repos = await res.json();
+
+        if(!Array.isArray(repos)) throw new Error();
 
         document.getElementById('tools-list').innerHTML = repos.slice(0, 5).map(repo => `
           <div class="tool-item">
@@ -316,7 +337,9 @@
             <div class="tool-desc">${repo.description || 'ريبو متاح للتحويل لتطبيق مصغر داخل المنصة.'}</div>
           </div>
         `).join('');
-      } catch (err) { console.error(err); }
+      } catch (err) { 
+        document.getElementById('tools-list').innerHTML = '<p style="font-size:0.8rem; color:var(--ink-faint);">تعذر جلب مستودعاتك الشخصية، تأكد من صلاحية التوكن.</p>';
+      }
     }
 
     async function convertRepoToMicroApp(repoName) {
