@@ -500,7 +500,7 @@ async function joinRoom(roomId, title, hostId) {
         
         const room = new LivekitClient.Room();
         await room.connect(wsUrl, token);
-        await room.localParticipant.enableMicrophone();
+        await room.localParticipant.setMicrophoneEnabled(true);
         
         currentRoom = room;
         currentRoomId = roomId;
