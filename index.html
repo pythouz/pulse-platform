@@ -3,26 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pulse Live Network</title>
+    <title>Pulse Live Network | غرف صوتية حية</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/livekit-client@1/dist/livekit-client.umd.js"></script>
     <style>
         body { background: #F8F5F0; color: #1A1A1A; font-family: 'Segoe UI', system-ui, sans-serif; }
         .pulse-logo { background: linear-gradient(135deg, #000 60%, #333); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
         #sandbox-terminal { background: #0d1117; min-height: 320px; max-height: 500px; overflow-y: auto; }
-        #sandbox-terminal::-webkit-scrollbar { width: 6px; }
-        #sandbox-terminal::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
         .nav-btn { transition: all .15s; }
         .nav-btn:hover { background: #f3f4f6; color: #000; }
-        .nav-btn.active { background: #000; color: #fff; border-radius: 10px; }
         @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
         .fade-in { animation: fadeIn .25s ease both; }
+        .participant-item { transition: background 0.1s ease; }
     </style>
 </head>
 <body class="min-h-full antialiased">
 
-<!-- Status Toast -->
+<!-- Toast رسالة -->
 <div id="status-msg" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-black text-white px-5 py-2.5 rounded-full text-sm font-medium shadow-xl hidden"></div>
 
 <!-- ══════════════════════════════════════════
@@ -122,7 +121,7 @@
             </div>
         </div>
 
-        <!-- Stats Card (يظهر للزوار أيضاً) -->
+        <!-- Stats Card -->
         <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-2">
             <h4 class="text-xs font-bold uppercase text-gray-400 tracking-wider mb-3">إحصائيات المنصة</h4>
             <div class="flex justify-between text-sm">
@@ -134,7 +133,6 @@
                 <span class="font-bold text-black" id="stat-rooms">—</span>
             </div>
         </div>
-
     </aside>
 
     <!-- ── MAIN CONTENT ── -->
@@ -142,8 +140,6 @@
 
         <!-- ════ TIMELINE VIEW ════ -->
         <section id="timeline-view" class="space-y-4 fade-in">
-
-            <!-- Composer (مسجل دخول) -->
             <div id="composer-logged-in" class="hidden bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-3">
                 <textarea id="post-textarea" rows="3"
                     placeholder="بم تفكر اليوم؟ شارك المجتمع فكرتك..."
@@ -156,17 +152,14 @@
                     </button>
                 </div>
             </div>
-
-            <!-- Composer (زائر) -->
             <div id="composer-logged-out" class="bg-amber-50 border border-amber-100 p-4 rounded-2xl text-center text-amber-700 font-medium text-sm">
                 🔒 سجّل دخولك للمشاركة في النقاشات وكتابة المنشورات
                 <button onclick="openAuthModal()" class="mr-2 underline font-bold hover:text-amber-900">دخول الآن</button>
             </div>
-
             <div id="posts-container" class="space-y-4"></div>
         </section>
 
-        <!-- ════ ROOMS VIEW ════ -->
+        <!-- ════ ROOMS VIEW (صوتية متقدمة مع LiveKit) ════ -->
         <section id="rooms-view" class="hidden space-y-4 fade-in">
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
                 <h2 class="text-xl font-black text-black flex items-center gap-2">
@@ -176,7 +169,7 @@
                 <!-- إنشاء غرفة -->
                 <div class="flex flex-col sm:flex-row gap-2">
                     <input type="text" id="room-title-input"
-                        placeholder="عنوان الجلسة (مثال: تحليل IFRS 17 المحاسبي)..."
+                        placeholder="عنوان الجلسة (مثال: نقاش حار عن التقنية)..."
                         class="flex-1 p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
                     <button onclick="createNewAudioRoom()"
                         class="bg-black text-white px-5 py-3 rounded-xl font-bold hover:bg-gray-800 transition text-sm whitespace-nowrap">
@@ -185,7 +178,7 @@
                 </div>
 
                 <!-- لوحة الغرفة النشطة (تظهر عند الانضمام) -->
-                <div id="active-room-panel" class="hidden bg-gray-900 text-white p-5 rounded-xl">
+                <div id="active-room-panel" class="hidden bg-gray-900 text-white p-5 rounded-xl shadow-lg">
                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div>
                             <span class="bg-red-600 text-white text-xs px-2 py-1 rounded-md font-bold mb-2 inline-flex items-center gap-1">
@@ -195,11 +188,10 @@
                             <p id="active-room-role" class="text-xs text-gray-400 mt-0.5">دورك: مستمع</p>
                         </div>
                         <div class="flex gap-2">
-                            <button id="mute-btn" onclick="toggleMic()" data-muted="false"
+                            <button id="mute-btn" onclick="toggleMic()" data-muted="true"
                                 class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-xl font-bold text-xs transition">
                                 <i class="fa-solid fa-microphone-slash ml-1"></i> كتم
                             </button>
-                            <!-- زر إغلاق الغرفة (يظهر فقط للمضيف داخل الغرفة) -->
                             <button id="close-active-room-btn" onclick="closeCurrentRoom()"
                                 class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-bold text-xs transition hidden">
                                 <i class="fa-solid fa-door-closed ml-1"></i> إغلاق الغرفة
@@ -210,9 +202,14 @@
                             </button>
                         </div>
                     </div>
+                    <!-- قائمة المشاركين (تحديث فوري) -->
+                    <div id="room-participants-list" class="mt-4 space-y-2 max-h-48 overflow-y-auto text-sm border-t border-gray-700 pt-3">
+                        <div class="text-gray-400 text-sm text-center">لم تنضم إلى أي غرفة</div>
+                    </div>
                 </div>
             </div>
 
+            <!-- شبكة الغرف المتاحة -->
             <div id="rooms-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
         </section>
 
@@ -222,8 +219,7 @@
                 <h2 class="text-xl font-black text-black flex items-center gap-2">
                     <i class="fa-solid fa-terminal text-green-600"></i> مشغّل المستودعات السحابي
                 </h2>
-                <p class="text-xs text-gray-500">أدخل رابط مستودع GitHub (Python أو Node.js) وسيتم استنساخه وتشغيله فوراً في بيئة معزولة.</p>
-
+                <p class="text-xs text-gray-500">أدخل رابط مستودع GitHub (Python أو Node.js) وسيتم استنساخه وتشغيله فوراً.</p>
                 <div class="space-y-3">
                     <input type="url" id="sandbox-repo-url"
                         placeholder="https://github.com/username/repository"
@@ -243,8 +239,6 @@
                     </div>
                 </div>
             </div>
-
-            <!-- Terminal -->
             <div class="rounded-2xl overflow-hidden border border-gray-800 shadow-xl">
                 <div class="bg-gray-800 px-4 py-2 flex items-center justify-between">
                     <div class="flex items-center gap-2">
@@ -257,7 +251,7 @@
                         <i class="fa-solid fa-trash-can ml-1"></i>مسح
                     </button>
                 </div>
-                <div id="sandbox-terminal" class="p-4 font-mono text-xs text-gray-300 leading-relaxed">
+                <div id="sandbox-terminal" class="p-4 font-mono text-xs text-gray-300 leading-relaxed bg-[#0d1117]" style="min-height: 320px;">
                     <div class="text-green-400">● Pulse Sandbox Engine جاهز. أدخل رابط المستودع وابدأ.</div>
                 </div>
             </div>
@@ -266,8 +260,7 @@
         <!-- ════ PROFILE VIEW ════ -->
         <section id="profile-view" class="hidden space-y-4 fade-in">
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <button onclick="navigateTo('timeline')"
-                    class="text-xs text-blue-600 font-bold mb-4 flex items-center gap-1 hover:underline">
+                <button onclick="navigateTo('timeline')" class="text-xs text-blue-600 font-bold mb-4 flex items-center gap-1 hover:underline">
                     <i class="fa-solid fa-arrow-right"></i> العودة للرئيسية
                 </button>
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -288,7 +281,6 @@
             </div>
             <div id="profile-posts-list" class="space-y-3"></div>
         </section>
-
     </main>
 </div>
 
