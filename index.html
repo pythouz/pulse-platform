@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pulse Live Network</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { background: #F8F5F0; color: #1A1A1A; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .pulse-logo { background: linear-gradient(135deg, #000 60%, #333); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        #sandbox-terminal { background: #0d1117; min-height: 320px; max-height: 500px; overflow-y: auto; }
+        #sandbox-terminal::-webkit-scrollbar { width: 6px; }
+        #sandbox-terminal::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+        .nav-btn { transition: all .15s; }
+        .nav-btn:hover { background: #f3f4f6; color: #000; }
+        .nav-btn.active { background: #000; color: #fff; border-radius: 10px; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        .fade-in { animation: fadeIn .25s ease both; }
+    </style>
+</head>
+<body class="min-h-full antialiased">
+
+<!-- Status Toast -->
+<div id="status-msg" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-black text-white px-5 py-2.5 rounded-full text-sm font-medium shadow-xl hidden"></div>
+
+<!-- ══════════════════════════════════════════
+     AUTH MODAL
+══════════════════════════════════════════ -->
+<div id="auth-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl p-7 w-full max-w-md shadow-2xl border border-gray-100 relative fade-in">
+        <button onclick="closeAuthModal()" class="absolute top-4 left-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-black transition">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+        <div class="flex justify-center mb-6">
+            <span class="text-2xl font-black tracking-widest pulse-logo">PULSE LIVE</span>
+        </div>
+        <h2 id="auth-modal-title" class="text-xl font-bold mb-5 text-center text-black">تسجيل الدخول</h2>
+
+        <!-- Login Form -->
+        <div id="login-form" class="space-y-3">
+            <input type="email" id="login-email" placeholder="البريد الإلكتروني"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <input type="password" id="login-password" placeholder="كلمة المرور"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <button onclick="handleLogin()"
+                class="w-full bg-black text-white p-3 rounded-xl font-bold hover:bg-gray-800 transition text-sm">
+                <i class="fa-solid fa-right-to-bracket ml-2"></i>دخول
+            </button>
+            <p class="text-center text-xs text-gray-500 pt-1">
+                ليس لديك حساب؟
+                <a href="#" onclick="switchToSignup()" class="text-black font-bold hover:underline">إنشاء حساب</a>
+            </p>
+        </div>
+
+        <!-- Signup Form -->
+        <div id="signup-form" class="space-y-3 hidden">
+            <input type="text" id="signup-name" placeholder="الاسم الكامل"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <input type="email" id="signup-email" placeholder="البريد الإلكتروني"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <input type="password" id="signup-password" placeholder="كلمة المرور (6 أحرف على الأقل)"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <button onclick="handleSignup()"
+                class="w-full bg-black text-white p-3 rounded-xl font-bold hover:bg-gray-800 transition text-sm">
+                <i class="fa-solid fa-user-plus ml-2"></i>إنشاء الحساب
+            </button>
+            <p class="text-center text-xs text-gray-500 pt-1">
+                لديك حساب؟
+                <a href="#" onclick="switchToLogin()" class="text-black font-bold hover:underline">تسجيل دخول</a>
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     LAYOUT
+══════════════════════════════════════════ -->
+<div class="max-w-6xl mx-auto px-3 py-5 grid grid-cols-1 md:grid-cols-4 gap-5">
+
+    <!-- ── SIDEBAR ── -->
+    <aside class="md:col-span-1 space-y-4">
+
+        <!-- Brand + Auth -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+            <h1 class="text-xl font-black tracking-widest text-center mb-4 pulse-logo">PULSE LIVE</h1>
+
+            <!-- زر تسجيل الدخول (للزوار) -->
+            <button id="auth-toggle-btn" onclick="openAuthModal()"
+                class="w-full bg-black text-white py-2.5 px-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-800 transition text-sm">
+                <i class="fa-solid fa-right-to-bracket"></i> تسجيل دخول
+            </button>
+
+            <!-- بطاقة المستخدم (بعد الدخول) -->
+            <div id="user-profile-card" class="hidden space-y-3">
+                <div class="flex flex-col items-center gap-2 pb-2 border-b border-gray-100">
+                    <div id="user-avatar-letter"
+                        class="w-14 h-14 bg-black text-white font-black text-xl rounded-full flex items-center justify-center shadow">
+                        م
+                    </div>
+                    <h3 id="user-display-name" class="font-bold text-sm text-black truncate max-w-full">...</h3>
+                </div>
+                <!-- Navigation -->
+                <nav class="flex flex-col gap-1">
+                    <button onclick="navigateTo('timeline')" class="nav-btn text-sm text-gray-600 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2">
+                        <i class="fa-solid fa-house w-4 text-center"></i> الرئيسية
+                    </button>
+                    <button onclick="navigateTo('rooms')" class="nav-btn text-sm text-gray-600 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2">
+                        <i class="fa-solid fa-headset w-4 text-center"></i> الغرف الصوتية
+                    </button>
+                    <button onclick="navigateTo('sandbox')" class="nav-btn text-sm text-gray-600 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2">
+                        <i class="fa-solid fa-code w-4 text-center"></i> مشغّل الأكواد
+                    </button>
+                    <button onclick="navigateTo('profile')" class="nav-btn text-sm text-gray-600 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2">
+                        <i class="fa-solid fa-user w-4 text-center"></i> ملفي الشخصي
+                    </button>
+                    <button onclick="handleLogout()" class="nav-btn text-sm text-red-500 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2 hover:bg-red-50">
+                        <i class="fa-solid fa-arrow-right-from-bracket w-4 text-center"></i> خروج
+                    </button>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Stats Card (يظهر للزوار أيضاً) -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-2">
+            <h4 class="text-xs font-bold uppercase text-gray-400 tracking-wider mb-3">إحصائيات المنصة</h4>
+            <div class="flex justify-between text-sm">
+                <span class="text-gray-500">المنشورات</span>
+                <span class="font-bold text-black" id="stat-posts">—</span>
+            </div>
+            <div class="flex justify-between text-sm">
+                <span class="text-gray-500">الغرف النشطة</span>
+                <span class="font-bold text-black" id="stat-rooms">—</span>
+            </div>
+        </div>
+
+    </aside>
+
+    <!-- ── MAIN CONTENT ── -->
+    <main class="md:col-span-3 space-y-5">
+
+        <!-- ════ TIMELINE VIEW ════ -->
+        <section id="timeline-view" class="space-y-4 fade-in">
+
+            <!-- Composer (مسجل دخول) -->
+            <div id="composer-logged-in" class="hidden bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+                <textarea id="post-textarea" rows="3"
+                    placeholder="بم تفكر اليوم؟ شارك المجتمع فكرتك..."
+                    class="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-black text-sm text-black leading-relaxed"></textarea>
+                <div class="flex justify-between items-center">
+                    <span class="text-xs text-gray-400"><i class="fa-solid fa-lock-open ml-1"></i>منشور عام</span>
+                    <button id="post-submit-btn"
+                        class="bg-black text-white px-6 py-2.5 rounded-xl font-bold hover:bg-gray-800 transition shadow-sm text-sm">
+                        <i class="fa-solid fa-paper-plane ml-1"></i> نشر
+                    </button>
+                </div>
+            </div>
+
+            <!-- Composer (زائر) -->
+            <div id="composer-logged-out" class="bg-amber-50 border border-amber-100 p-4 rounded-2xl text-center text-amber-700 font-medium text-sm">
+                🔒 سجّل دخولك للمشاركة في النقاشات وكتابة المنشورات
+                <button onclick="openAuthModal()" class="mr-2 underline font-bold hover:text-amber-900">دخول الآن</button>
+            </div>
+
+            <div id="posts-container" class="space-y-4"></div>
+        </section>
+
+        <!-- ════ ROOMS VIEW ════ -->
+        <section id="rooms-view" class="hidden space-y-4 fade-in">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                <h2 class="text-xl font-black text-black flex items-center gap-2">
+                    <i class="fa-solid fa-tower-broadcast text-red-500"></i> المجالس الصوتية المباشرة
+                </h2>
+
+                <!-- إنشاء غرفة -->
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <input type="text" id="room-title-input"
+                        placeholder="عنوان الجلسة (مثال: تحليل IFRS 17 المحاسبي)..."
+                        class="flex-1 p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+                    <button onclick="createNewAudioRoom()"
+                        class="bg-black text-white px-5 py-3 rounded-xl font-bold hover:bg-gray-800 transition text-sm whitespace-nowrap">
+                        <i class="fa-solid fa-plus ml-1"></i> إطلاق غرفة
+                    </button>
+                </div>
+
+                <!-- لوحة الغرفة النشطة (تظهر عند الانضمام) -->
+                <div id="active-room-panel" class="hidden bg-gray-900 text-white p-5 rounded-xl">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <span class="bg-red-600 text-white text-xs px-2 py-1 rounded-md font-bold mb-2 inline-flex items-center gap-1">
+                                <span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span> مباشر الآن
+                            </span>
+                            <h3 id="active-room-title" class="text-base font-bold mt-1">—</h3>
+                            <p id="active-room-role" class="text-xs text-gray-400 mt-0.5">دورك: مستمع</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="mute-btn" onclick="toggleMic()" data-muted="false"
+                                class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-xl font-bold text-xs transition">
+                                <i class="fa-solid fa-microphone-slash ml-1"></i> كتم
+                            </button>
+                            <!-- زر إغلاق الغرفة (يظهر فقط للمضيف داخل الغرفة) -->
+                            <button id="close-active-room-btn" onclick="closeCurrentRoom()"
+                                class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-bold text-xs transition hidden">
+                                <i class="fa-solid fa-door-closed ml-1"></i> إغلاق الغرفة
+                            </button>
+                            <button onclick="leaveCurrentAudioRoom()"
+                                class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-bold text-xs transition">
+                                <i class="fa-solid fa-phone-slash ml-1"></i> مغادرة
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="rooms-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
+        </section>
+
+        <!-- ════ SANDBOX VIEW ════ -->
+        <section id="sandbox-view" class="hidden space-y-4 fade-in">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                <h2 class="text-xl font-black text-black flex items-center gap-2">
+                    <i class="fa-solid fa-terminal text-green-600"></i> مشغّل المستودعات السحابي
+                </h2>
+                <p class="text-xs text-gray-500">أدخل رابط مستودع GitHub (Python أو Node.js) وسيتم استنساخه وتشغيله فوراً في بيئة معزولة.</p>
+
+                <div class="space-y-3">
+                    <input type="url" id="sandbox-repo-url"
+                        placeholder="https://github.com/username/repository"
+                        class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm font-mono">
+                    <div class="flex gap-2">
+                        <input type="text" id="sandbox-entry-file"
+                            placeholder="نقطة الدخول (اختياري، مثال: main.py)"
+                            class="flex-1 p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm font-mono">
+                        <button id="sandbox-run-btn" onclick="runSandbox()"
+                            class="bg-green-600 hover:bg-green-700 text-white px-5 py-3 rounded-xl font-bold text-sm transition whitespace-nowrap">
+                            <i class="fa-solid fa-play ml-1"></i> تشغيل
+                        </button>
+                        <button onclick="stopSandbox()"
+                            class="bg-red-500 hover:bg-red-600 text-white px-4 py-3 rounded-xl font-bold text-sm transition">
+                            <i class="fa-solid fa-stop"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Terminal -->
+            <div class="rounded-2xl overflow-hidden border border-gray-800 shadow-xl">
+                <div class="bg-gray-800 px-4 py-2 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="w-3 h-3 bg-red-500 rounded-full"></span>
+                        <span class="w-3 h-3 bg-yellow-500 rounded-full"></span>
+                        <span class="w-3 h-3 bg-green-500 rounded-full"></span>
+                        <span class="text-gray-400 text-xs font-mono mr-2">pulse-sandbox ~ bash</span>
+                    </div>
+                    <button onclick="clearTerminal()" class="text-gray-500 hover:text-gray-300 text-xs transition">
+                        <i class="fa-solid fa-trash-can ml-1"></i>مسح
+                    </button>
+                </div>
+                <div id="sandbox-terminal" class="p-4 font-mono text-xs text-gray-300 leading-relaxed">
+                    <div class="text-green-400">● Pulse Sandbox Engine جاهز. أدخل رابط المستودع وابدأ.</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ════ PROFILE VIEW ════ -->
+        <section id="profile-view" class="hidden space-y-4 fade-in">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <button onclick="navigateTo('timeline')"
+                    class="text-xs text-blue-600 font-bold mb-4 flex items-center gap-1 hover:underline">
+                    <i class="fa-solid fa-arrow-right"></i> العودة للرئيسية
+                </button>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div class="flex items-center gap-4">
+                        <div class="w-16 h-16 bg-black text-white font-black text-2xl rounded-full flex items-center justify-center shadow-lg" id="profile-avatar">م</div>
+                        <div>
+                            <h2 id="profile-display-name" class="text-2xl font-black text-black">—</h2>
+                            <p id="profile-username" class="text-sm text-gray-500 mt-0.5">—</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="text-center bg-gray-50 border px-5 py-3 rounded-xl">
+                            <span class="block text-2xl font-black text-black" id="profile-posts-count">0</span>
+                            <span class="text-xs text-gray-500 font-bold">منشور</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="profile-posts-list" class="space-y-3"></div>
+        </section>
+
+    </main>
+</div>
+
+<script src="assets/app.js"></script>
+</body>
+</html>
