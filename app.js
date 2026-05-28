@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// Pulse Live — Frontend Engine v15 (LiveKit Real Audio Rooms + Full Features)
+// Pulse Live — Frontend Engine v16 (LiveKit Real Audio Rooms - Fully Fixed)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const SUPABASE_URL      = 'https://jnwqokkzywrctdjsdzbl.supabase.co';
@@ -13,9 +13,9 @@ let scrollPositionBeforeRender = 0;
 // ══════════════════════════════════════════════════════════════════════════════
 // LiveKit globals
 // ══════════════════════════════════════════════════════════════════════════════
-let currentRoom = null;          // LiveKit Room object
-let currentRoomId = null;        // id in Supabase
-let currentRoomHostId = null;    // host_id from Supabase
+let currentRoom = null;
+let currentRoomId = null;
+let currentRoomHostId = null;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Professional number formatter
@@ -84,7 +84,6 @@ function navigateTo(view) {
     if (view === 'timeline') fetchPosts();
     if (view === 'rooms')    fetchRooms();
     if (view === 'profile')  renderProfilePage();
-    // إذا تركنا صفحة الغرف ونحن في غرفة، نغلق الاتصال الصوتي
     if (view !== 'rooms' && currentRoom) {
         leaveCurrentAudioRoom();
     }
@@ -151,7 +150,7 @@ function updateUIForAuth() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// POSTS (unchanged)
+// POSTS
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchPosts() {
     const { data, error } = await db
@@ -423,7 +422,7 @@ function renderProfilePage() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// LIVEKIT AUDIO ROOMS (Professional real-time voice)
+// LIVEKIT AUDIO ROOMS (Fixed)
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function fetchRooms() {
@@ -482,24 +481,37 @@ async function createNewAudioRoom() {
 
 async function joinRoom(roomId, title, hostId) {
     if (!currentUser) return alert('يجب تسجيل الدخول للانضمام.');
-    if (currentRoom) {
-        await leaveCurrentAudioRoom();
-    }
-    
+    if (currentRoom) await leaveCurrentAudioRoom();
+
     const userName = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
     const roomName = `room_${roomId}`;
-    
+
     try {
+        console.log('📡 Requesting token for:', { roomName, participantName: userName });
+        
         const tokenRes = await fetch('/api/livekit-token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ roomName, participantName: userName })
         });
-        if (!tokenRes.ok) throw new Error('Failed to get token');
+
+        console.log('📡 Response status:', tokenRes.status);
+        
+        if (!tokenRes.ok) {
+            let errorMsg = `HTTP ${tokenRes.status}`;
+            try {
+                const errorData = await tokenRes.json();
+                errorMsg = errorData.error || errorMsg;
+            } catch(e) { errorMsg = await tokenRes.text() || errorMsg; }
+            throw new Error(`فشل الحصول على التوكن: ${errorMsg}`);
+        }
+
         const { token, wsUrl } = await tokenRes.json();
+        console.log('✅ Token received, connecting to LiveKit...');
         
         const room = new LivekitClient.Room();
         await room.connect(wsUrl, token);
+        // استخدم الدالة الصحيحة
         await room.localParticipant.setMicrophoneEnabled(true);
         
         currentRoom = room;
@@ -527,8 +539,8 @@ async function joinRoom(roomId, title, hostId) {
         window.addEventListener('beforeunload', () => { if (currentRoom) currentRoom.disconnect(); });
         showStatusMessage(`دخلت إلى غرفة "${title}"`, 'success');
     } catch (err) {
-        console.error('Join room error:', err);
-        alert('تعذر الانضمام إلى الغرفة الصوتية. تأكد من تشغيل الـ API endpoint (api/livekit-token) ومتغيرات البيئة.');
+        console.error('❌ Join room error:', err);
+        alert('تعذر الانضمام إلى الغرفة الصوتية: ' + err.message);
     }
 }
 
@@ -608,7 +620,7 @@ async function closeCurrentRoom() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SANDBOX (unchanged)
+// SANDBOX
 // ══════════════════════════════════════════════════════════════════════════════
 let sandboxController = null;
 
