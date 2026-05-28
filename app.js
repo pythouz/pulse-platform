@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// Pulse Live — Frontend Engine v17 (LiveKit Audio with Full Fixes)
+// Pulse Live — Frontend Engine v18 (Final LiveKit Audio Fix)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const SUPABASE_URL      = 'https://jnwqokkzywrctdjsdzbl.supabase.co';
@@ -10,13 +10,12 @@ let currentUser   = null;
 let allPostsCache = [];
 let scrollPositionBeforeRender = 0;
 
-// LiveKit globals
 let currentRoom = null;
 let currentRoomId = null;
 let currentRoomHostId = null;
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Professional number formatter
+// Helpers
 // ══════════════════════════════════════════════════════════════════════════════
 function formatNumber(num) {
     if (num === undefined || num === null) return '0';
@@ -43,9 +42,6 @@ function formatNumber(num) {
     return sign + absNum.toString();
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Helpers
-// ══════════════════════════════════════════════════════════════════════════════
 function sortPostsByNetVotes(posts) {
     return [...posts].sort((a, b) => {
         const netA = (a.upvotes || 0) - (a.downvotes || 0);
@@ -417,7 +413,7 @@ function renderProfilePage() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// LIVEKIT AUDIO ROOMS (fully functional)
+// LIVEKIT AUDIO ROOMS (FIXED: setMicrophoneEnabled instead of enableMicrophone)
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchRooms() {
     const { data, error } = await db.from('audio_rooms')
@@ -496,9 +492,8 @@ async function joinRoom(roomId, title, hostId) {
 
         const room = new LivekitClient.Room();
         
-        // الاستماع للأحداث الصوتية
         room.on('trackSubscribed', (track, publication, participant) => {
-            console.log(`📢 Track subscribed from ${participant.identity} (${track.kind})`);
+            console.log(`📢 Track from ${participant.identity} (${track.kind})`);
             if (track.kind === 'audio') {
                 const audioEl = new Audio();
                 track.attach(audioEl);
@@ -508,17 +503,14 @@ async function joinRoom(roomId, title, hostId) {
         room.on('trackPublished', (publication, participant) => {
             console.log(`🎙️ ${participant.identity} published ${publication.kind}`);
         });
-        room.on('trackUnpublished', (publication, participant) => {
-            console.log(`🔇 ${participant.identity} unpublished ${publication.kind}`);
-        });
 
         await room.connect(wsUrl, token);
         console.log('🔌 Connected to LiveKit');
 
-        // تمكين الميكروفون مع التعامل مع الأذونات
+        // ✅ FIXED: use setMicrophoneEnabled instead of enableMicrophone
         try {
             await room.localParticipant.setMicrophoneEnabled(true);
-            console.log('🎤 Microphone enabled');
+            console.log('🎤 Microphone enabled successfully');
         } catch (micErr) {
             console.error('❌ Microphone error:', micErr);
             alert('لم نتمكن من الوصول إلى الميكروفون. تأكد من منح الإذن.');
@@ -619,7 +611,7 @@ async function closeCurrentRoom() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SANDBOX (unchanged)
+// SANDBOX
 // ══════════════════════════════════════════════════════════════════════════════
 let sandboxController = null;
 
