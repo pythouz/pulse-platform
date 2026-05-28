@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// Pulse Live — Frontend Engine v16 (LiveKit Real Audio Rooms - Fully Fixed)
+// Pulse Live — Frontend Engine v17 (LiveKit Audio with Full Fixes)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const SUPABASE_URL      = 'https://jnwqokkzywrctdjsdzbl.supabase.co';
@@ -10,9 +10,7 @@ let currentUser   = null;
 let allPostsCache = [];
 let scrollPositionBeforeRender = 0;
 
-// ══════════════════════════════════════════════════════════════════════════════
 // LiveKit globals
-// ══════════════════════════════════════════════════════════════════════════════
 let currentRoom = null;
 let currentRoomId = null;
 let currentRoomHostId = null;
@@ -24,7 +22,6 @@ function formatNumber(num) {
     if (num === undefined || num === null) return '0';
     const sign = num < 0 ? '-' : '';
     let absNum = Math.abs(num);
-    
     if (absNum >= 1_000_000_000) {
         let val = absNum / 1_000_000_000;
         val = Math.floor(val * 10) / 10;
@@ -84,9 +81,7 @@ function navigateTo(view) {
     if (view === 'timeline') fetchPosts();
     if (view === 'rooms')    fetchRooms();
     if (view === 'profile')  renderProfilePage();
-    if (view !== 'rooms' && currentRoom) {
-        leaveCurrentAudioRoom();
-    }
+    if (view !== 'rooms' && currentRoom) leaveCurrentAudioRoom();
 }
 
 function openAuthModal()  { document.getElementById('auth-modal').classList.remove('hidden'); }
@@ -422,9 +417,8 @@ function renderProfilePage() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// LIVEKIT AUDIO ROOMS (Fixed)
+// LIVEKIT AUDIO ROOMS (fully functional)
 // ══════════════════════════════════════════════════════════════════════════════
-
 async function fetchRooms() {
     const { data, error } = await db.from('audio_rooms')
         .select('*').eq('is_active', true).order('created_at', { ascending: false });
@@ -474,7 +468,6 @@ async function createNewAudioRoom() {
     }).select().single();
     if (error) { console.error('createRoom:', error.message); return alert('فشل إنشاء الغرفة: ' + error.message); }
     input.value = '';
-    
     await joinRoom(data.id, data.title, data.host_id);
     fetchRooms();
 }
@@ -488,59 +481,74 @@ async function joinRoom(roomId, title, hostId) {
 
     try {
         console.log('📡 Requesting token for:', { roomName, participantName: userName });
-        
         const tokenRes = await fetch('/api/livekit-token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ roomName, participantName: userName })
         });
-
-        console.log('📡 Response status:', tokenRes.status);
-        
         if (!tokenRes.ok) {
-            let errorMsg = `HTTP ${tokenRes.status}`;
-            try {
-                const errorData = await tokenRes.json();
-                errorMsg = errorData.error || errorMsg;
-            } catch(e) { errorMsg = await tokenRes.text() || errorMsg; }
-            throw new Error(`فشل الحصول على التوكن: ${errorMsg}`);
+            let errMsg = `HTTP ${tokenRes.status}`;
+            try { const errData = await tokenRes.json(); errMsg = errData.error || errMsg; } catch(e) {}
+            throw new Error(`فشل التوكن: ${errMsg}`);
+        }
+        const { token, wsUrl } = await tokenRes.json();
+        console.log('✅ Token received');
+
+        const room = new LivekitClient.Room();
+        
+        // الاستماع للأحداث الصوتية
+        room.on('trackSubscribed', (track, publication, participant) => {
+            console.log(`📢 Track subscribed from ${participant.identity} (${track.kind})`);
+            if (track.kind === 'audio') {
+                const audioEl = new Audio();
+                track.attach(audioEl);
+                audioEl.play().catch(e => console.warn('Autoplay failed:', e));
+            }
+        });
+        room.on('trackPublished', (publication, participant) => {
+            console.log(`🎙️ ${participant.identity} published ${publication.kind}`);
+        });
+        room.on('trackUnpublished', (publication, participant) => {
+            console.log(`🔇 ${participant.identity} unpublished ${publication.kind}`);
+        });
+
+        await room.connect(wsUrl, token);
+        console.log('🔌 Connected to LiveKit');
+
+        // تمكين الميكروفون مع التعامل مع الأذونات
+        try {
+            await room.localParticipant.setMicrophoneEnabled(true);
+            console.log('🎤 Microphone enabled');
+        } catch (micErr) {
+            console.error('❌ Microphone error:', micErr);
+            alert('لم نتمكن من الوصول إلى الميكروفون. تأكد من منح الإذن.');
         }
 
-        const { token, wsUrl } = await tokenRes.json();
-        console.log('✅ Token received, connecting to LiveKit...');
-        
-        const room = new LivekitClient.Room();
-        await room.connect(wsUrl, token);
-        // استخدم الدالة الصحيحة
-        await room.localParticipant.setMicrophoneEnabled(true);
-        
         currentRoom = room;
         currentRoomId = roomId;
         currentRoomHostId = hostId;
-        
+
         document.getElementById('active-room-title').textContent = title;
         const isHost = (currentUser.id === hostId);
         document.getElementById('active-room-role').textContent = isHost ? 'دورك: مضيف' : 'دورك: مستمع';
         document.getElementById('active-room-panel').classList.remove('hidden');
-        
         const closeBtn = document.getElementById('close-active-room-btn');
         if (isHost) closeBtn.classList.remove('hidden');
         else closeBtn.classList.add('hidden');
-        
+
         updateParticipantsList(room);
-        
         room.on('participantConnected', () => updateParticipantsList(room));
         room.on('participantDisconnected', () => updateParticipantsList(room));
         room.on('trackSubscribed', () => updateParticipantsList(room));
         room.on('trackUnsubscribed', () => updateParticipantsList(room));
         room.on('localParticipant.microphoneMuted', () => updateMicButtonState());
         room.on('localParticipant.microphoneUnmuted', () => updateMicButtonState());
-        
+
         window.addEventListener('beforeunload', () => { if (currentRoom) currentRoom.disconnect(); });
-        showStatusMessage(`دخلت إلى غرفة "${title}"`, 'success');
+        showStatusMessage(`دخلت غرفة "${title}"`, 'success');
     } catch (err) {
         console.error('❌ Join room error:', err);
-        alert('تعذر الانضمام إلى الغرفة الصوتية: ' + err.message);
+        alert('تعذر الانضمام: ' + err.message);
     }
 }
 
@@ -550,30 +558,24 @@ function updateParticipantsList(room) {
     const participants = Array.from(room.participants.values());
     const local = room.localParticipant;
     let html = `
-        <div class="flex items-center justify-between p-2 rounded-lg bg-gray-800 participant-item">
+        <div class="flex items-center justify-between p-2 rounded-lg bg-gray-800">
             <div class="flex items-center gap-2">
-                <i class="fa-solid fa-circle-user text-gray-300"></i>
-                <span class="font-medium text-white">${esc(local.identity)} (أنت)</span>
+                <i class="fa-solid fa-circle-user"></i>
+                <span>${esc(local.identity)} (أنت)</span>
             </div>
-            <div>
-                ${local.isMicrophoneEnabled ? '<i class="fa-solid fa-microphone text-green-400"></i>' : '<i class="fa-solid fa-microphone-slash text-red-400"></i>'}
-            </div>
-        </div>
-    `;
+            <div>${local.isMicrophoneEnabled ? '<i class="fa-solid fa-microphone text-green-400"></i>' : '<i class="fa-solid fa-microphone-slash text-red-400"></i>'}</div>
+        </div>`;
     for (const p of participants) {
         html += `
-            <div class="flex items-center justify-between p-2 rounded-lg bg-gray-700 participant-item">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-gray-700">
                 <div class="flex items-center gap-2">
-                    <i class="fa-solid fa-circle-user text-gray-300"></i>
-                    <span class="font-medium text-white">${esc(p.identity)}</span>
+                    <i class="fa-solid fa-circle-user"></i>
+                    <span>${esc(p.identity)}</span>
                 </div>
-                <div>
-                    ${p.isMicrophoneEnabled ? '<i class="fa-solid fa-microphone text-green-400"></i>' : '<i class="fa-solid fa-microphone-slash text-red-400"></i>'}
-                </div>
-            </div>
-        `;
+                <div>${p.isMicrophoneEnabled ? '<i class="fa-solid fa-microphone text-green-400"></i>' : '<i class="fa-solid fa-microphone-slash text-red-400"></i>'}</div>
+            </div>`;
     }
-    container.innerHTML = html || '<div class="text-gray-400 text-sm text-center">لا يوجد مشاركون آخرون</div>';
+    container.innerHTML = html || '<div class="text-gray-400 text-center">لا مشاركون آخرون</div>';
 }
 
 function updateMicButtonState() {
@@ -603,24 +605,21 @@ async function leaveCurrentAudioRoom() {
     }
     document.getElementById('active-room-panel').classList.add('hidden');
     const container = document.getElementById('room-participants-list');
-    if (container) container.innerHTML = '<div class="text-gray-400 text-sm text-center">لم تنضم إلى أي غرفة</div>';
+    if (container) container.innerHTML = '<div class="text-gray-400 text-center">لم تنضم إلى أي غرفة</div>';
 }
 
 async function closeCurrentRoom() {
     if (!currentRoomId) return;
-    if (!confirm('هل تريد إغلاق هذه الغرفة نهائياً؟')) return;
+    if (!confirm('هل تريد إغلاق الغرفة نهائياً؟')) return;
     const { error } = await db.from('audio_rooms').update({ is_active: false }).eq('id', currentRoomId);
-    if (error) {
-        alert('فشل إغلاق الغرفة: ' + error.message);
-        return;
-    }
+    if (error) return alert('فشل إغلاق الغرفة: ' + error.message);
     await leaveCurrentAudioRoom();
     fetchRooms();
     navigateTo('rooms');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SANDBOX
+// SANDBOX (unchanged)
 // ══════════════════════════════════════════════════════════════════════════════
 let sandboxController = null;
 
