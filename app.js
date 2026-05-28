@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// Pulse Live — Frontend Engine v13 (Professional number formatting, floor-based)
+// Pulse Live — Frontend Engine v15 (LiveKit Real Audio Rooms + Full Features)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const SUPABASE_URL      = 'https://jnwqokkzywrctdjsdzbl.supabase.co';
@@ -11,7 +11,14 @@ let allPostsCache = [];
 let scrollPositionBeforeRender = 0;
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Professional number formatter (like YouTube/Facebook)
+// LiveKit globals
+// ══════════════════════════════════════════════════════════════════════════════
+let currentRoom = null;          // LiveKit Room object
+let currentRoomId = null;        // id in Supabase
+let currentRoomHostId = null;    // host_id from Supabase
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Professional number formatter
 // ══════════════════════════════════════════════════════════════════════════════
 function formatNumber(num) {
     if (num === undefined || num === null) return '0';
@@ -54,6 +61,18 @@ function sortPostsByNetVotes(posts) {
 function preserveScrollBeforeRender() { scrollPositionBeforeRender = window.scrollY; }
 function restoreScrollAfterRender() { window.scrollTo({ top: scrollPositionBeforeRender, behavior: 'instant' }); }
 
+function showStatusMessage(msg, type = 'info') {
+    const toast = document.getElementById('status-msg');
+    if (!toast) return;
+    toast.textContent = msg;
+    toast.classList.remove('hidden', 'bg-black', 'bg-green-600', 'bg-red-600');
+    if (type === 'success') toast.classList.add('bg-green-600');
+    else if (type === 'error') toast.classList.add('bg-red-600');
+    else toast.classList.add('bg-black');
+    toast.classList.remove('hidden');
+    setTimeout(() => toast.classList.add('hidden'), 3000);
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ROUTER & AUTH
 // ══════════════════════════════════════════════════════════════════════════════
@@ -65,6 +84,10 @@ function navigateTo(view) {
     if (view === 'timeline') fetchPosts();
     if (view === 'rooms')    fetchRooms();
     if (view === 'profile')  renderProfilePage();
+    // إذا تركنا صفحة الغرف ونحن في غرفة، نغلق الاتصال الصوتي
+    if (view !== 'rooms' && currentRoom) {
+        leaveCurrentAudioRoom();
+    }
 }
 
 function openAuthModal()  { document.getElementById('auth-modal').classList.remove('hidden'); }
@@ -101,6 +124,7 @@ async function handleLogin() {
 }
 
 async function handleLogout() {
+    if (currentRoom) await leaveCurrentAudioRoom();
     await db.auth.signOut();
     location.reload();
 }
@@ -120,18 +144,15 @@ function updateUIForAuth() {
         const name = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
         document.getElementById('user-display-name').textContent  = name;
         document.getElementById('user-avatar-letter').textContent = name.charAt(0).toUpperCase();
-        updateActiveRoomCloseButton();
     } else {
         navigateTo('timeline');
-        document.getElementById('active-room-panel')?.classList.add('hidden');
-        window.currentActiveRoom = null;
+        if (currentRoom) leaveCurrentAudioRoom();
     }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// POSTS
+// POSTS (unchanged)
 // ══════════════════════════════════════════════════════════════════════════════
-
 async function fetchPosts() {
     const { data, error } = await db
         .from('posts')
@@ -402,9 +423,8 @@ function renderProfilePage() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ROOMS (unchanged, keep previous version)
+// LIVEKIT AUDIO ROOMS (Professional real-time voice)
 // ══════════════════════════════════════════════════════════════════════════════
-let currentActiveRoom = null;
 
 async function fetchRooms() {
     const { data, error } = await db.from('audio_rooms')
@@ -413,7 +433,6 @@ async function fetchRooms() {
     renderRooms(data || []);
     const el = document.getElementById('stat-rooms');
     if (el) el.textContent = (data || []).length;
-    updateActiveRoomCloseButton();
 }
 
 function renderRooms(rooms) {
@@ -436,7 +455,7 @@ function renderRooms(rooms) {
             </div>
             <h3 class="font-bold text-black">${esc(room.title)}</h3>
             <p class="text-xs text-gray-500">المضيف: ${esc(room.host_name)}</p>
-            <button onclick="joinRoom(${room.id}, '${esc(room.title)}', '${room.host_id}')"
+            <button onclick="joinRoom('${room.id}', '${esc(room.title)}', '${room.host_id}')"
                 class="w-full bg-black text-white py-2.5 rounded-xl text-sm font-bold hover:bg-gray-800 transition">
                 <i class="fa-solid fa-headphones ml-1"></i> انضمام للجلسة
             </button>`;
@@ -450,64 +469,146 @@ async function createNewAudioRoom() {
     const title = input?.value.trim();
     if (!title) return alert('أدخل عنوان الغرفة.');
     const host_name = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
+    
     const { data, error } = await db.from('audio_rooms').insert({
         title, host_name, host_id: currentUser.id, is_active: true
     }).select().single();
     if (error) { console.error('createRoom:', error.message); return alert('فشل إنشاء الغرفة: ' + error.message); }
     input.value = '';
+    
+    await joinRoom(data.id, data.title, data.host_id);
     fetchRooms();
-    joinRoom(data.id, data.title, data.host_id);
 }
 
-function joinRoom(roomId, title, hostId) {
+async function joinRoom(roomId, title, hostId) {
     if (!currentUser) return alert('يجب تسجيل الدخول للانضمام.');
-    currentActiveRoom = { id: roomId, hostId };
-    document.getElementById('active-room-title').textContent = title;
-    const isHost = (currentUser.id === hostId);
-    document.getElementById('active-room-role').textContent = isHost ? 'دورك: مضيف' : 'دورك: مستمع';
-    document.getElementById('active-room-panel').classList.remove('hidden');
-    updateActiveRoomCloseButton();
+    if (currentRoom) {
+        await leaveCurrentAudioRoom();
+    }
+    
+    const userName = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
+    const roomName = `room_${roomId}`;
+    
+    try {
+        const tokenRes = await fetch('/api/livekit-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roomName, participantName: userName })
+        });
+        if (!tokenRes.ok) throw new Error('Failed to get token');
+        const { token, wsUrl } = await tokenRes.json();
+        
+        const room = new LivekitClient.Room();
+        await room.connect(wsUrl, token);
+        await room.localParticipant.enableMicrophone();
+        
+        currentRoom = room;
+        currentRoomId = roomId;
+        currentRoomHostId = hostId;
+        
+        document.getElementById('active-room-title').textContent = title;
+        const isHost = (currentUser.id === hostId);
+        document.getElementById('active-room-role').textContent = isHost ? 'دورك: مضيف' : 'دورك: مستمع';
+        document.getElementById('active-room-panel').classList.remove('hidden');
+        
+        const closeBtn = document.getElementById('close-active-room-btn');
+        if (isHost) closeBtn.classList.remove('hidden');
+        else closeBtn.classList.add('hidden');
+        
+        updateParticipantsList(room);
+        
+        room.on('participantConnected', () => updateParticipantsList(room));
+        room.on('participantDisconnected', () => updateParticipantsList(room));
+        room.on('trackSubscribed', () => updateParticipantsList(room));
+        room.on('trackUnsubscribed', () => updateParticipantsList(room));
+        room.on('localParticipant.microphoneMuted', () => updateMicButtonState());
+        room.on('localParticipant.microphoneUnmuted', () => updateMicButtonState());
+        
+        window.addEventListener('beforeunload', () => { if (currentRoom) currentRoom.disconnect(); });
+        showStatusMessage(`دخلت إلى غرفة "${title}"`, 'success');
+    } catch (err) {
+        console.error('Join room error:', err);
+        alert('تعذر الانضمام إلى الغرفة الصوتية. تأكد من تشغيل الـ API endpoint (api/livekit-token) ومتغيرات البيئة.');
+    }
 }
 
-function updateActiveRoomCloseButton() {
-    const closeBtn = document.getElementById('close-active-room-btn');
-    if (!closeBtn) return;
-    if (currentActiveRoom && currentUser && currentUser.id === currentActiveRoom.hostId) {
-        closeBtn.classList.remove('hidden');
-    } else {
-        closeBtn.classList.add('hidden');
+function updateParticipantsList(room) {
+    const container = document.getElementById('room-participants-list');
+    if (!container) return;
+    const participants = Array.from(room.participants.values());
+    const local = room.localParticipant;
+    let html = `
+        <div class="flex items-center justify-between p-2 rounded-lg bg-gray-800 participant-item">
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-circle-user text-gray-300"></i>
+                <span class="font-medium text-white">${esc(local.identity)} (أنت)</span>
+            </div>
+            <div>
+                ${local.isMicrophoneEnabled ? '<i class="fa-solid fa-microphone text-green-400"></i>' : '<i class="fa-solid fa-microphone-slash text-red-400"></i>'}
+            </div>
+        </div>
+    `;
+    for (const p of participants) {
+        html += `
+            <div class="flex items-center justify-between p-2 rounded-lg bg-gray-700 participant-item">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-circle-user text-gray-300"></i>
+                    <span class="font-medium text-white">${esc(p.identity)}</span>
+                </div>
+                <div>
+                    ${p.isMicrophoneEnabled ? '<i class="fa-solid fa-microphone text-green-400"></i>' : '<i class="fa-solid fa-microphone-slash text-red-400"></i>'}
+                </div>
+            </div>
+        `;
     }
+    container.innerHTML = html || '<div class="text-gray-400 text-sm text-center">لا يوجد مشاركون آخرون</div>';
+}
+
+function updateMicButtonState() {
+    const btn = document.getElementById('mute-btn');
+    if (!btn || !currentRoom) return;
+    const isMuted = !currentRoom.localParticipant.isMicrophoneEnabled;
+    btn.dataset.muted = isMuted;
+    btn.innerHTML = isMuted ? `<i class="fa-solid fa-microphone-slash ml-1"></i> كتم` : `<i class="fa-solid fa-microphone ml-1"></i> الميك شغال`;
+}
+
+async function toggleMic() {
+    if (!currentRoom) return;
+    if (currentRoom.localParticipant.isMicrophoneEnabled) {
+        await currentRoom.localParticipant.setMicrophoneEnabled(false);
+    } else {
+        await currentRoom.localParticipant.setMicrophoneEnabled(true);
+    }
+    updateMicButtonState();
+}
+
+async function leaveCurrentAudioRoom() {
+    if (currentRoom) {
+        currentRoom.disconnect();
+        currentRoom = null;
+        currentRoomId = null;
+        currentRoomHostId = null;
+    }
+    document.getElementById('active-room-panel').classList.add('hidden');
+    const container = document.getElementById('room-participants-list');
+    if (container) container.innerHTML = '<div class="text-gray-400 text-sm text-center">لم تنضم إلى أي غرفة</div>';
 }
 
 async function closeCurrentRoom() {
-    if (!currentActiveRoom || !currentUser || currentUser.id !== currentActiveRoom.hostId) {
-        alert('ليس لديك صلاحية لإغلاق هذه الغرفة.');
-        return;
-    }
-    if (!confirm('هل تريد إغلاق هذه الغرفة؟')) return;
-    const { error } = await db.from('audio_rooms').update({ is_active: false }).eq('id', currentActiveRoom.id);
+    if (!currentRoomId) return;
+    if (!confirm('هل تريد إغلاق هذه الغرفة نهائياً؟')) return;
+    const { error } = await db.from('audio_rooms').update({ is_active: false }).eq('id', currentRoomId);
     if (error) {
         alert('فشل إغلاق الغرفة: ' + error.message);
-    } else {
-        leaveCurrentAudioRoom();
-        fetchRooms();
+        return;
     }
-}
-
-function leaveCurrentAudioRoom() {
-    document.getElementById('active-room-panel').classList.add('hidden');
-    currentActiveRoom = null;
-}
-
-function toggleMic() {
-    const btn = document.getElementById('mute-btn');
-    const muted = btn.dataset.muted === 'true';
-    btn.dataset.muted = String(!muted);
-    btn.innerHTML = muted ? `<i class="fa-solid fa-microphone ml-1"></i> الميك شغال` : `<i class="fa-solid fa-microphone-slash ml-1"></i> كتم`;
+    await leaveCurrentAudioRoom();
+    fetchRooms();
+    navigateTo('rooms');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SANDBOX
+// SANDBOX (unchanged)
 // ══════════════════════════════════════════════════════════════════════════════
 let sandboxController = null;
 
@@ -627,5 +728,4 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUIForAuth();
     document.getElementById('post-submit-btn')?.addEventListener('click', createPost);
     fetchPosts();
-    // No auto-refresh
 });
