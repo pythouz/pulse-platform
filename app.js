@@ -67,7 +67,79 @@ function renderProfilePage() { /* ... no changes ... */ }
 // LIVEKIT AUDIO ROOMS (FIXED)
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchRooms() { /* ... no changes ... */ }
-function renderRooms(rooms) { /* ... no changes ... */ }
+function renderRooms(rooms) {
+    const grid  = document.getElementById('rooms-grid');
+    const empty = document.getElementById('rooms-empty-state');
+    if (!grid) return;
+
+    const active = rooms.filter(r => r.is_active);
+
+    if (active.length === 0) {
+        grid.innerHTML = '';
+        if (empty) empty.style.display = 'block';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    const colors = ['#6366f1','#8b5cf6','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#14b8a6'];
+    const getColor = (name) => colors[Math.abs(Array.from(name||'A').reduce((a,c)=>a+c.charCodeAt(0),0)) % colors.length];
+    const getInitial = (name) => (name||'?')[0].toUpperCase();
+
+    grid.innerHTML = active.map(room => {
+        const speakers  = room.speakers  || [];
+        const listeners = room.listeners || [];
+        const totalCount = room.participants_count || (speakers.length + listeners.length) || 0;
+
+        const speakersHTML = speakers.slice(0,4).map(sp => {
+            const color = getColor(sp.name);
+            return `<div style="text-align:center">
+                <div style="width:52px;height:52px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:800;color:#fff;margin:0 auto 6px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.12)">
+                    ${getInitial(sp.name)}
+                </div>
+                <div style="font-size:0.68rem;color:#555;font-weight:600;max-width:56px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(sp.name||'')}</div>
+            </div>`;
+        }).join('');
+
+        const listenersHTML = listeners.slice(0,8).map(li => {
+            const color = getColor(li.name);
+            return `<div style="width:36px;height:36px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:700;color:#fff;border:2px solid #fff" title="${esc(li.name||'')}">
+                ${getInitial(li.name)}
+            </div>`;
+        }).join('');
+
+        const hostName = speakers[0]?.name || room.host_name || 'المضيف';
+
+        return `<div class="ch-room-card" onclick="joinRoom('${room.id}','${esc(room.title)}','${room.host_id}')">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+                <div style="flex:1">
+                    <h3 style="font-size:1rem;font-weight:800;color:#1a1a1a;margin:0 0 5px;line-height:1.35">${esc(room.title)}</h3>
+                    <div style="font-size:0.72rem;color:#888;display:flex;align-items:center;gap:6px">
+                        <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:20px;font-weight:700;font-size:0.66rem">
+                            🎤 ${esc(hostName)}
+                        </span>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;background:#fef2f2;border-radius:20px;padding:4px 10px">
+                    <span style="width:6px;height:6px;background:#ef4444;border-radius:50%;animation:blink 1.2s infinite;display:inline-block"></span>
+                    <span style="font-size:0.7rem;font-weight:700;color:#dc2626">مباشر</span>
+                </div>
+            </div>
+
+            <!-- المتحدثون في الكارد -->
+            ${speakersHTML ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">${speakersHTML}</div>` : ''}
+
+            <div style="height:1px;background:#f5f5f5;margin:12px 0"></div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between">
+                <div style="display:flex;gap:-8px">${listenersHTML}</div>
+                <div style="font-size:0.75rem;color:#aaa;font-weight:600">
+                    <i class="fa-solid fa-headphones" style="color:#d4a574;margin-left:4px"></i>
+                    ${totalCount} مشارك
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
 async function createNewAudioRoom() { /* ... no changes ... */ }
 
 async function joinRoom(roomId, title, hostId) {
@@ -129,10 +201,13 @@ async function joinRoom(roomId, title, hostId) {
         document.getElementById('active-room-title').textContent = title;
         const isHost = (currentUser.id === hostId);
         document.getElementById('active-room-role').textContent = isHost ? 'دورك: مضيف' : 'دورك: مستمع';
-        document.getElementById('active-room-panel').classList.remove('hidden');
+        document.getElementById('active-room-panel').style.display = 'flex';
+        document.getElementById('active-room-panel').style.flexDirection = 'column';
+        document.body.style.overflow = 'hidden';
+        isCurrentUserHost = isHost;
         const closeBtn = document.getElementById('close-active-room-btn');
-        if (isHost) closeBtn.classList.remove('hidden');
-        else closeBtn.classList.add('hidden');
+        if (isHost) closeBtn.style.display = 'flex';
+        else closeBtn.style.display = 'none';
 
         updateParticipantsList(room);
         room.on('participantConnected', () => updateParticipantsList(room));
@@ -151,43 +226,68 @@ async function joinRoom(roomId, title, hostId) {
 }
 
 function updateParticipantsList(room) {
-    const container = document.getElementById('room-participants-list');
-    if (!container) return;
-    const participants = Array.from(room.participants.values());
+    const speakersGrid  = document.getElementById('speakers-grid');
+    const listenersGrid = document.getElementById('listeners-grid');
+    if (!speakersGrid || !listenersGrid) return;
+
+    const colors = ['#6366f1','#8b5cf6','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#14b8a6'];
+    const getColor = (name) => colors[Math.abs(Array.from(name||'A').reduce((a,c)=>a+c.charCodeAt(0),0)) % colors.length];
+    const getInitial = (name) => (name||'?')[0].toUpperCase();
+
     const local = room.localParticipant;
-    let html = `
-        <div class="flex items-center justify-between p-2 rounded-lg bg-gray-800 participant-item">
-            <div class="flex items-center gap-2">
-                <i class="fa-solid fa-circle-user text-gray-300"></i>
-                <span class="font-medium text-white">${esc(local.identity)} (أنت)</span>
+    const remotes = Array.from(room.participants.values());
+    const all = [{ identity: local.identity, isMicEnabled: local.isMicrophoneEnabled, isLocal: true }, ...remotes.map(p => ({ identity: p.identity, isMicEnabled: p.isMicrophoneEnabled, isLocal: false }))];
+
+    // المضيف والمتحدثون (أول 2 مشاركين) → كبير
+    const speakers  = all.slice(0, Math.min(6, all.length));
+    const listeners = all.slice(Math.min(6, all.length));
+
+    speakersGrid.innerHTML = speakers.map(p => {
+        const color = getColor(p.identity);
+        const initial = getInitial(p.identity);
+        const isActive = p.isMicEnabled;
+        const ring = isActive ? `border:3px solid #f9a825;animation:speakPulse 1.5s infinite;` : `border:3px solid rgba(255,255,255,.15);`;
+        return `<div style="text-align:center;min-width:80px">
+            <div style="width:72px;height:72px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:900;color:#fff;margin:0 auto 8px;${ring}box-sizing:border-box;position:relative">
+                ${initial}
+                ${isActive ? `<span style="position:absolute;bottom:2px;right:2px;width:18px;height:18px;border-radius:50%;background:#22c55e;border:2px solid #0f3460;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-microphone" style="font-size:8px;color:#fff"></i></span>` : `<span style="position:absolute;bottom:2px;right:2px;width:18px;height:18px;border-radius:50%;background:#374151;border:2px solid #0f3460;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-microphone-slash" style="font-size:8px;color:#9ca3af"></i></span>`}
             </div>
-            <div>
-                ${local.isMicrophoneEnabled ? '<i class="fa-solid fa-microphone text-green-400"></i>' : '<i class="fa-solid fa-microphone-slash text-red-400"></i>'}
-            </div>
-        </div>
-    `;
-    for (const p of participants) {
-        html += `
-            <div class="flex items-center justify-between p-2 rounded-lg bg-gray-700 participant-item">
-                <div class="flex items-center gap-2">
-                    <i class="fa-solid fa-circle-user text-gray-300"></i>
-                    <span class="font-medium text-white">${esc(p.identity)}</span>
+            <div style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,.9);max-width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0 auto">${esc(p.identity)}${p.isLocal ? ' 👤' : ''}</div>
+            ${p.isLocal && isCurrentUserHost ? `<div style="font-size:0.62rem;color:#f9a825;font-weight:700;margin-top:2px">مضيف</div>` : ''}
+        </div>`;
+    }).join('');
+
+    listenersGrid.innerHTML = listeners.length > 0
+        ? listeners.map(p => {
+            const color = getColor(p.identity);
+            const initial = getInitial(p.identity);
+            return `<div title="${esc(p.identity)}" style="text-align:center">
+                <div style="width:48px;height:48px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700;color:#fff;opacity:.85">
+                    ${initial}
                 </div>
-                <div>
-                    ${p.isMicrophoneEnabled ? '<i class="fa-solid fa-microphone text-green-400"></i>' : '<i class="fa-solid fa-microphone-slash text-red-400"></i>'}
-                </div>
-            </div>
-        `;
-    }
-    container.innerHTML = html || '<div class="text-gray-400 text-sm text-center">لا يوجد مشاركون آخرون</div>';
+                <div style="font-size:0.62rem;color:rgba(255,255,255,.5);margin-top:4px;max-width:48px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.identity)}</div>
+            </div>`;
+          }).join('')
+        : `<div style="color:rgba(255,255,255,.35);font-size:0.8rem">لا يوجد جمهور بعد</div>`;
 }
+
+let isCurrentUserHost = false;
 
 function updateMicButtonState() {
     const btn = document.getElementById('mute-btn');
     if (!btn || !currentRoom) return;
     const isMuted = !currentRoom.localParticipant.isMicrophoneEnabled;
     btn.dataset.muted = isMuted;
-    btn.innerHTML = isMuted ? `<i class="fa-solid fa-microphone-slash ml-1"></i> كتم` : `<i class="fa-solid fa-microphone ml-1"></i> الميك شغال`;
+    if (isMuted) {
+        btn.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
+        btn.style.background = 'rgba(255,255,255,.12)';
+        btn.style.animation = '';
+    } else {
+        btn.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+        btn.style.background = 'rgba(34,197,94,0.25)';
+        btn.style.animation = 'micActive 1s infinite';
+        btn.style.boxShadow = '0 0 0 0 rgba(34,197,94,0.7)';
+    }
 }
 
 async function toggleMic() {
@@ -207,9 +307,14 @@ async function leaveCurrentAudioRoom() {
         currentRoomId = null;
         currentRoomHostId = null;
     }
-    document.getElementById('active-room-panel').classList.add('hidden');
-    const container = document.getElementById('room-participants-list');
-    if (container) container.innerHTML = '<div class="text-gray-400 text-sm text-center">لم تنضم إلى أي غرفة</div>';
+    const panel = document.getElementById('active-room-panel');
+    if (panel) panel.style.display = 'none';
+    document.body.style.overflow = '';
+    isCurrentUserHost = false;
+    const sg = document.getElementById('speakers-grid');
+    const lg = document.getElementById('listeners-grid');
+    if (sg) sg.innerHTML = '';
+    if (lg) lg.innerHTML = '';
 }
 
 async function closeCurrentRoom() {
@@ -239,8 +344,44 @@ function updateStats() { /* ... no changes ... */ }
 function esc(str) { /* ... no changes ... */ }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// CLUBHOUSE HELPERS
+// ══════════════════════════════════════════════════════════════════════════════
+function showCreateRoomModal() {
+    if (!currentUser) { openAuthModal(); return; }
+    const modal = document.getElementById('create-room-modal');
+    if (modal) { modal.style.display = 'flex'; }
+}
+
+function hideCreateRoomModal(event) {
+    const modal = document.getElementById('create-room-modal');
+    if (!modal) return;
+    // إغلاق عند الضغط على الخلفية فقط
+    if (event && event.target !== modal) return;
+    modal.style.display = 'none';
+}
+
+function raiseHand() {
+    const btn = document.getElementById('raise-hand-btn');
+    if (!btn) return;
+    const isRaised = btn.dataset.raised === 'true';
+    if (isRaised) {
+        btn.style.background = 'rgba(255,255,255,.08)';
+        btn.dataset.raised = 'false';
+        showStatusMessage('أنزلت يدك', 'info');
+    } else {
+        btn.style.background = 'rgba(249,168,37,0.25)';
+        btn.style.border = '2px solid rgba(249,168,37,0.5)';
+        btn.dataset.raised = 'true';
+        showStatusMessage('رفعت يدك ✋', 'success');
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // GLOBAL EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
+window.showCreateRoomModal   = showCreateRoomModal;
+window.hideCreateRoomModal   = hideCreateRoomModal;
+window.raiseHand             = raiseHand;
 window.navigateTo            = navigateTo;
 window.openAuthModal         = openAuthModal;
 window.closeAuthModal        = closeAuthModal;
@@ -269,4 +410,12 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUIForAuth();
     document.getElementById('post-submit-btn')?.addEventListener('click', createPost);
     fetchPosts();
+
+    // إغلاق مودال الغرفة عند الضغط على Escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const modal = document.getElementById('create-room-modal');
+            if (modal && modal.style.display === 'flex') hideCreateRoomModal({ target: modal });
+        }
+    });
 });
