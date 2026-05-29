@@ -1,126 +1,149 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// Pulse Live — Frontend Engine v20 (Clubhouse Rooms + Full Auth Fix)
+// Pulse — Frontend Engine v3.0 (Premium Social + Clubhouse Rooms)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const SUPABASE_URL      = 'https://jnwqokkzywrctdjsdzbl.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impud3Fva2t6eXdyY3RkanNkemJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4MTkxOTYsImV4cCI6MjA5NTM5NTE5Nn0.8RkJ2A1oJ9DaSD0Y8CdiNwvcfcr7iWyQZf5eKD3kpAo';
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let currentUser   = null;
-let allPostsCache = [];
-let scrollPositionBeforeRender = 0;
-let currentRoom       = null;
-let currentRoomId     = null;
-let currentRoomHostId = null;
-let isCurrentUserHost = false;
+// ── State ──
+let currentUser        = null;
+let allPostsCache      = [];
+let currentTab         = 'latest';
+let currentRoom        = null;
+let currentRoomId      = null;
+let currentRoomHostId  = null;
+let isCurrentUserHost  = false;
+let scrollY            = 0;
+
+// ── Avatar color palette ──
+const COLORS = ['#6366f1','#8b5cf6','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#14b8a6','#f97316','#06b6d4'];
+const getColor   = s => COLORS[Math.abs(Array.from(s||'A').reduce((a,c)=>a+c.charCodeAt(0),0))%COLORS.length];
+const getInitial = s => (s||'?')[0].toUpperCase();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // UTILS
 // ══════════════════════════════════════════════════════════════════════════════
-function esc(str) {
-    if (!str) return '';
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function esc(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function formatNumber(n) {
-    if (!n) return '0';
-    if (n >= 1000) return (n/1000).toFixed(1) + 'k';
+function fmtNum(n) {
+    n = n || 0;
+    if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+    if (n >= 1000)    return (n/1000).toFixed(1)    + 'k';
     return String(n);
 }
 
-function showStatusMessage(msg, type = 'info') {
-    const toast = document.getElementById('status-msg');
-    if (!toast) return;
-    toast.textContent = msg;
-    toast.classList.remove('hidden','bg-black','bg-green-600','bg-red-600');
-    if (type === 'success') toast.classList.add('bg-green-600');
-    else if (type === 'error') toast.classList.add('bg-red-600');
-    else toast.classList.add('bg-black');
-    toast.classList.remove('hidden');
-    setTimeout(() => toast.classList.add('hidden'), 3000);
+function fmtDate(iso) {
+    if (!iso) return '';
+    const d   = new Date(iso);
+    const now = new Date();
+    const sec = Math.floor((now - d) / 1000);
+    if (sec < 60)   return 'الآن';
+    if (sec < 3600) return `${Math.floor(sec/60)} د`;
+    if (sec < 86400)return `${Math.floor(sec/3600)} س`;
+    return d.toLocaleDateString('ar-EG', { month:'short', day:'numeric' });
 }
 
-function preserveScrollBeforeRender() {
-    scrollPositionBeforeRender = window.scrollY;
-}
-function restoreScrollAfterRender() {
-    window.scrollTo(0, scrollPositionBeforeRender);
+function toast(msg, type='info') {
+    const el = document.getElementById('status-msg');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.background = type==='success'?'#16a34a':type==='error'?'#dc2626':'#0f0f0f';
+    el.classList.remove('hidden');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.add('hidden'), 3500);
 }
 
-function sortPostsByNetVotes(posts) {
-    return [...posts].sort((a, b) => ((b.upvotes||0)-(b.downvotes||0)) - ((a.upvotes||0)-(a.downvotes||0)));
+function avatar(name, size='av-sm', extra='') {
+    return `<div class="avatar ${size}" style="background:${getColor(name)};${extra}">${getInitial(name)}</div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ROUTER
 // ══════════════════════════════════════════════════════════════════════════════
+const VIEWS = ['timeline','rooms','explore','profile'];
+
 function navigateTo(view) {
-    ['timeline','rooms','sandbox','profile'].forEach(v => {
-        const el = document.getElementById(v + '-view');
+    VIEWS.forEach(v => {
+        const el = document.getElementById(v+'-view');
         if (el) el.classList.add('hidden');
     });
-    const target = document.getElementById(view + '-view');
+    const target = document.getElementById(view+'-view');
     if (target) target.classList.remove('hidden');
 
-    if (view === 'rooms')   fetchRooms();
-    if (view === 'profile') renderProfilePage();
+    // update nav active state — desktop
+    VIEWS.forEach(v => {
+        const btn    = document.getElementById('nav-'+v);
+        const mobBtn = document.getElementById('mob-nav-'+v);
+        if (btn)    btn.classList.toggle('active',    v===view);
+        if (mobBtn) mobBtn.classList.toggle('active', v===view);
+    });
+
+    if (view === 'rooms')   { fetchRooms(); }
+    if (view === 'profile') { if (currentUser) renderProfilePage(); else openAuthModal(); }
+    if (view === 'explore') { renderExplorePage(); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// AUTH MODAL
+// AUTH
 // ══════════════════════════════════════════════════════════════════════════════
 function openAuthModal() {
-    const modal = document.getElementById('auth-modal');
-    if (modal) modal.classList.remove('hidden');
+    document.getElementById('auth-modal').classList.remove('hidden');
 }
-
 function closeAuthModal() {
-    const modal = document.getElementById('auth-modal');
-    if (modal) modal.classList.add('hidden');
+    document.getElementById('auth-modal').classList.add('hidden');
 }
-
+function outsideCloseAuth(e) {
+    if (e.target.id === 'auth-modal') closeAuthModal();
+}
 function switchToSignup() {
-    document.getElementById('login-form')?.classList.add('hidden');
-    document.getElementById('signup-form')?.classList.remove('hidden');
-    const title = document.getElementById('auth-modal-title');
-    if (title) title.textContent = 'إنشاء حساب جديد';
+    document.getElementById('login-form').classList.add('hidden');
+    document.getElementById('signup-form').classList.remove('hidden');
+    document.getElementById('auth-modal-title').textContent = 'إنشاء حساب';
 }
-
 function switchToLogin() {
-    document.getElementById('signup-form')?.classList.add('hidden');
-    document.getElementById('login-form')?.classList.remove('hidden');
-    const title = document.getElementById('auth-modal-title');
-    if (title) title.textContent = 'تسجيل الدخول';
+    document.getElementById('signup-form').classList.add('hidden');
+    document.getElementById('login-form').classList.remove('hidden');
+    document.getElementById('auth-modal-title').textContent = 'تسجيل الدخول';
 }
 
 async function handleLogin() {
     const email    = document.getElementById('login-email')?.value?.trim();
     const password = document.getElementById('login-password')?.value;
-    if (!email || !password) return showStatusMessage('أدخل البريد وكلمة المرور', 'error');
+    if (!email || !password) return toast('أدخل البريد وكلمة المرور', 'error');
+    const btn = document.querySelector('#login-form button');
+    if (btn) { btn.textContent = '...'; btn.disabled = true; }
     const { error } = await db.auth.signInWithPassword({ email, password });
-    if (error) return showStatusMessage('خطأ: ' + error.message, 'error');
+    if (btn) { btn.innerHTML = 'دخول <i class="fa-solid fa-arrow-left"></i>'; btn.disabled = false; }
+    if (error) return toast(error.message, 'error');
     closeAuthModal();
-    showStatusMessage('أهلاً بك! 🎉', 'success');
+    toast('أهلاً بك! 🎉', 'success');
 }
 
 async function handleSignup() {
     const name     = document.getElementById('signup-name')?.value?.trim();
     const email    = document.getElementById('signup-email')?.value?.trim();
     const password = document.getElementById('signup-password')?.value;
-    if (!name || !email || !password) return showStatusMessage('يرجى تعبئة جميع الحقول', 'error');
-    if (password.length < 6) return showStatusMessage('كلمة المرور يجب أن تكون 6 أحرف على الأقل', 'error');
+    if (!name || !email || !password) return toast('يرجى تعبئة جميع الحقول', 'error');
+    if (password.length < 6) return toast('كلمة المرور 6 أحرف على الأقل', 'error');
+    const btn = document.querySelector('#signup-form button');
+    if (btn) { btn.textContent = '...'; btn.disabled = true; }
     const { error } = await db.auth.signUp({ email, password, options: { data: { full_name: name } } });
-    if (error) return showStatusMessage('خطأ: ' + error.message, 'error');
+    if (btn) { btn.innerHTML = 'إنشاء الحساب ✨'; btn.disabled = false; }
+    if (error) return toast(error.message, 'error');
     closeAuthModal();
-    showStatusMessage('تم إنشاء الحساب! مرحباً بك 🎊', 'success');
+    toast('مرحباً بك في Pulse! 🎊', 'success');
 }
 
 async function handleLogout() {
     await db.auth.signOut();
     currentUser = null;
-    showStatusMessage('تم تسجيل الخروج', 'info');
-    navigateTo('timeline');
     updateUIForAuth();
+    navigateTo('timeline');
+    toast('إلى اللقاء! 👋', 'info');
 }
 
 db.auth.onAuthStateChange((event, session) => {
@@ -130,24 +153,26 @@ db.auth.onAuthStateChange((event, session) => {
 });
 
 function updateUIForAuth() {
-    const isLoggedIn = !!currentUser;
-    const authBtn        = document.getElementById('auth-toggle-btn');
-    const profileCard    = document.getElementById('user-profile-card');
-    const composerIn     = document.getElementById('composer-logged-in');
-    const composerOut    = document.getElementById('composer-logged-out');
+    const loggedIn = !!currentUser;
 
-    if (authBtn)     authBtn.classList.toggle('hidden', isLoggedIn);
-    if (profileCard) profileCard.classList.toggle('hidden', !isLoggedIn);
-    if (composerIn)  composerIn.classList.toggle('hidden', !isLoggedIn);
-    if (composerOut) composerOut.classList.toggle('hidden', isLoggedIn);
+    document.getElementById('auth-toggle-btn')?.classList.toggle('hidden', loggedIn);
+    document.getElementById('user-profile-card')?.classList.toggle('hidden', !loggedIn);
+    document.getElementById('composer-logged-in')?.classList.toggle('hidden', !loggedIn);
+    document.getElementById('composer-logged-out')?.classList.toggle('hidden', loggedIn);
 
-    if (isLoggedIn && currentUser) {
-        const name    = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم';
-        const initial = name[0].toUpperCase();
-        const nameEl  = document.getElementById('user-display-name');
-        const avatarEl= document.getElementById('user-avatar-letter');
-        if (nameEl)   nameEl.textContent   = name;
-        if (avatarEl) avatarEl.textContent = initial;
+    if (loggedIn && currentUser) {
+        const name = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم';
+        const c    = getColor(name);
+
+        const setEl = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
+        const setStyle = (id, prop, val) => { const el=document.getElementById(id); if(el) el.style[prop]=val; };
+
+        setEl('user-display-name', name);
+        setEl('user-email-display', currentUser.email || '');
+        setEl('user-avatar-letter', getInitial(name));
+        setEl('composer-avatar', getInitial(name));
+        setStyle('user-avatar-letter', 'background', c);
+        setStyle('composer-avatar', 'background', c);
     }
     updateStats();
 }
@@ -156,133 +181,198 @@ function updateUIForAuth() {
 // POSTS
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchPosts() {
-    const { data, error } = await db.from('posts').select('*').order('created_at', { ascending: false }).limit(50);
+    const { data, error } = await db.from('posts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(80);
     if (error) { console.error('fetchPosts:', error); return; }
     allPostsCache = data || [];
-    renderTimeline(allPostsCache);
+    renderTimeline();
     updateStats();
+}
+
+function switchTab(tab) {
+    currentTab = tab;
+    document.getElementById('tab-latest')?.classList.toggle('active', tab==='latest');
+    document.getElementById('tab-top')?.classList.toggle('active',    tab==='top');
+    renderTimeline();
+}
+
+function getSortedPosts() {
+    if (currentTab === 'top') {
+        return [...allPostsCache].sort((a,b) =>
+            ((b.upvotes||0)-(b.downvotes||0)) - ((a.upvotes||0)-(a.downvotes||0))
+        );
+    }
+    return [...allPostsCache];
+}
+
+function renderTimeline() {
+    const container = document.getElementById('posts-container');
+    if (!container) return;
+    const posts = getSortedPosts();
+    if (!posts.length) {
+        container.innerHTML = `<div class="card" style="padding:50px 20px;text-align:center">
+            <div style="font-size:2.5rem;margin-bottom:12px">📭</div>
+            <p style="color:var(--muted);font-size:.9rem">لا توجد منشورات بعد.<br>كن أول من يشارك!</p>
+        </div>`;
+        return;
+    }
+    scrollY = window.scrollY;
+    container.innerHTML = posts.map(postCard).join('');
+    window.scrollTo(0, scrollY);
+}
+
+function postCard(post) {
+    const name    = post.author_name || 'مجهول';
+    const net     = (post.upvotes||0) - (post.downvotes||0);
+    const netSign = net >= 0 ? '+' : '';
+    const isOwner = currentUser?.id === post.user_id;
+    const content = esc(post.content).replace(/#(\S+)/g,
+        '<span style="color:var(--accent2);cursor:pointer;font-weight:700" onclick="filterByTag(\'$1\')">#$1</span>');
+
+    return `<div class="card post-card fade-up" data-id="${post.id}">
+        <div style="display:flex;gap:12px">
+            ${avatar(name, 'av-sm')}
+            <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="font-weight:800;font-size:.88rem;color:var(--dark)">${esc(name)}</span>
+                        ${post.is_verified ? '<span style="color:#3b82f6;font-size:.75rem" title="موثّق">✓</span>' : ''}
+                        <span style="font-size:.72rem;color:var(--muted)">${fmtDate(post.created_at)}</span>
+                    </div>
+                    ${isOwner ? `<button onclick="deletePost('${post.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;padding:4px 6px;border-radius:8px" title="حذف"><i class="fa-regular fa-trash-can"></i></button>` : ''}
+                </div>
+                <p style="font-size:.88rem;line-height:1.7;color:#2a2a2a;white-space:pre-wrap;margin:0 0 12px">${content}</p>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <button class="reaction-btn" onclick="handleVote('${post.id}','up')">
+                        <i class="fa-solid fa-arrow-up"></i> ${fmtNum(post.upvotes||0)}
+                    </button>
+                    <button class="reaction-btn" onclick="handleVote('${post.id}','down')">
+                        <i class="fa-solid fa-arrow-down"></i> ${fmtNum(post.downvotes||0)}
+                    </button>
+                    <span style="font-size:.75rem;color:var(--muted);font-weight:700;margin-right:auto">${netSign}${net}</span>
+                </div>
+            </div>
+        </div>
+    </div>`;
 }
 
 async function createPost() {
     if (!currentUser) return openAuthModal();
-    const ta = document.getElementById('post-textarea');
+    const ta      = document.getElementById('post-textarea');
     const content = ta?.value?.trim();
-    if (!content) return showStatusMessage('اكتب شيئاً أولاً!', 'error');
+    if (!content) return toast('اكتب شيئاً أولاً!', 'error');
     const btn = document.getElementById('post-submit-btn');
-    if (btn) btn.disabled = true;
+    if (btn) { btn.disabled = true; btn.textContent = '...'; }
+
     const name = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم';
     const { error } = await db.from('posts').insert({
         content,
-        user_id: currentUser.id,
+        user_id:     currentUser.id,
         author_name: name,
-        upvotes: 0,
-        downvotes: 0,
+        upvotes:     0,
+        downvotes:   0,
     });
-    if (btn) btn.disabled = false;
-    if (error) return showStatusMessage('فشل النشر: ' + error.message, 'error');
-    if (ta) ta.value = '';
-    showStatusMessage('تم النشر! ✅', 'success');
+    if (btn) { btn.disabled = false; btn.innerHTML = 'نشر <i class="fa-solid fa-paper-plane"></i>'; }
+    if (error) return toast('فشل النشر: ' + error.message, 'error');
+    ta.value = '';
+    toast('تم النشر! ✅', 'success');
     fetchPosts();
 }
 
-function renderTimeline(posts) {
-    const container = document.getElementById('posts-container');
-    if (!container) return;
-    if (!posts || posts.length === 0) {
-        container.innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;font-size:0.9rem">لا توجد منشورات بعد. كن أول من يشارك! 🚀</div>';
-        return;
-    }
-    preserveScrollBeforeRender();
-    const sorted = sortPostsByNetVotes(posts);
-    container.innerHTML = sorted.map(post => {
-        const net     = (post.upvotes||0) - (post.downvotes||0);
-        const date    = new Date(post.created_at).toLocaleDateString('ar-EG', { month:'short', day:'numeric' });
-        const initial = (post.author_name||'م')[0].toUpperCase();
-        const isOwner = currentUser && currentUser.id === post.user_id;
-        return `<div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 fade-in">
-            <div class="flex items-start gap-3">
-                <div class="w-9 h-9 rounded-full bg-black text-white flex items-center justify-center font-black text-sm shrink-0">${initial}</div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center justify-between gap-2 mb-1">
-                        <span class="font-bold text-sm text-black truncate">${esc(post.author_name||'مجهول')}</span>
-                        <span class="text-xs text-gray-400 shrink-0">${date}</span>
-                    </div>
-                    <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${esc(post.content)}</p>
-                    <div class="flex items-center gap-3 mt-3">
-                        <button onclick="handleVote('${post.id}','up')" class="flex items-center gap-1 text-xs text-gray-500 hover:text-green-600 transition font-bold">
-                            <i class="fa-solid fa-arrow-up"></i> ${formatNumber(post.upvotes||0)}
-                        </button>
-                        <button onclick="handleVote('${post.id}','down')" class="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 transition font-bold">
-                            <i class="fa-solid fa-arrow-down"></i> ${formatNumber(post.downvotes||0)}
-                        </button>
-                        <span class="text-xs text-gray-400 font-bold ml-auto">${net >= 0 ? '+' : ''}${net}</span>
-                        ${isOwner ? `<button onclick="deletePost('${post.id}')" class="text-xs text-gray-300 hover:text-red-400 transition"><i class="fa-solid fa-trash"></i></button>` : ''}
-                    </div>
-                </div>
-            </div>
-        </div>`;
-    }).join('');
-    restoreScrollAfterRender();
-}
-
-async function handleVote(postId, voteType) {
+async function handleVote(postId, type) {
     if (!currentUser) return openAuthModal();
-    const field = voteType === 'up' ? 'upvotes' : 'downvotes';
+    const field = type === 'up' ? 'upvotes' : 'downvotes';
     const post  = allPostsCache.find(p => p.id === postId);
     if (!post) return;
-    const newVal = (post[field]||0) + 1;
-    const { error } = await db.from('posts').update({ [field]: newVal }).eq('id', postId);
-    if (error) return showStatusMessage('فشل التصويت', 'error');
-    post[field] = newVal;
-    renderTimeline(allPostsCache);
+    const { error } = await db.from('posts').update({ [field]: (post[field]||0)+1 }).eq('id', postId);
+    if (error) return toast('فشل التصويت', 'error');
+    post[field] = (post[field]||0) + 1;
+    renderTimeline();
 }
 
 async function deletePost(postId) {
     if (!currentUser) return;
-    if (!confirm('هل تريد حذف هذا المنشور؟')) return;
+    if (!confirm('حذف هذا المنشور؟')) return;
     const { error } = await db.from('posts').delete().eq('id', postId).eq('user_id', currentUser.id);
-    if (error) return showStatusMessage('فشل الحذف: ' + error.message, 'error');
+    if (error) return toast('فشل الحذف', 'error');
     allPostsCache = allPostsCache.filter(p => p.id !== postId);
-    renderTimeline(allPostsCache);
-    showStatusMessage('تم الحذف', 'info');
+    renderTimeline();
+    toast('تم الحذف', 'info');
 }
 
-async function submitComment(postId) {
-    // placeholder — extend if comments table exists
-    showStatusMessage('التعليقات قريباً!', 'info');
+function filterByTag(tag) {
+    navigateTo('timeline');
+    const filtered = allPostsCache.filter(p => p.content?.includes('#'+tag));
+    const container = document.getElementById('posts-container');
+    if (!container) return;
+    if (!filtered.length) {
+        container.innerHTML = `<div class="card" style="padding:32px;text-align:center;color:var(--muted)">لا توجد منشورات بوسم #${esc(tag)}</div>`;
+        return;
+    }
+    container.innerHTML = filtered.map(postCard).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EXPLORE
+// ══════════════════════════════════════════════════════════════════════════════
+function renderExplorePage() {
+    const el = document.getElementById('explore-posts');
+    if (!el) return;
+    const top = [...allPostsCache]
+        .sort((a,b) => ((b.upvotes||0)-(b.downvotes||0)) - ((a.upvotes||0)-(a.downvotes||0)))
+        .slice(0, 10);
+    if (!top.length) {
+        el.innerHTML = '<p style="color:var(--muted);font-size:.85rem">لا توجد منشورات بعد.</p>';
+        return;
+    }
+    el.innerHTML = top.map(postCard).join('');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PROFILE
 // ══════════════════════════════════════════════════════════════════════════════
 function renderProfilePage() {
-    if (!currentUser) return navigateTo('timeline');
+    if (!currentUser) return;
     const name    = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم';
-    const initial = name[0].toUpperCase();
-    const nameEl  = document.getElementById('profile-display-name');
-    const userEl  = document.getElementById('profile-username');
-    const avatEl  = document.getElementById('profile-avatar');
-    if (nameEl)   nameEl.textContent   = name;
-    if (userEl)   userEl.textContent   = currentUser.email || '';
-    if (avatEl)   avatEl.textContent   = initial;
+    const initial = getInitial(name);
+    const color   = getColor(name);
 
-    const myPosts = allPostsCache.filter(p => p.user_id === currentUser.id);
-    const countEl = document.getElementById('profile-posts-count');
-    if (countEl)  countEl.textContent = myPosts.length;
+    const setEl    = (id, val)       => { const el=document.getElementById(id); if(el) el.textContent=val; };
+    const setStyle = (id, prop, val) => { const el=document.getElementById(id); if(el) el.style[prop]=val; };
 
-    const listEl  = document.getElementById('profile-posts-list');
+    setEl('profile-display-name', name);
+    setEl('profile-username', currentUser.email || '');
+    setEl('profile-avatar', initial);
+    setStyle('profile-avatar', 'background', color);
+
+    const myPosts  = allPostsCache.filter(p => p.user_id === currentUser.id);
+    const myVotes  = myPosts.reduce((s,p) => s + (p.upvotes||0), 0);
+    setEl('profile-posts-count', myPosts.length);
+    setEl('profile-votes-count', fmtNum(myVotes));
+    setEl('profile-rooms-count', '—');
+
+    const listEl = document.getElementById('profile-posts-list');
     if (!listEl) return;
-    if (myPosts.length === 0) {
-        listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#aaa;font-size:0.9rem">لم تنشر شيئاً بعد</div>';
+    if (!myPosts.length) {
+        listEl.innerHTML = '<p style="text-align:center;color:var(--muted);padding:24px 0;font-size:.88rem">لم تنشر شيئاً بعد 📝</p>';
         return;
     }
-    listEl.innerHTML = myPosts.map(post => {
-        const date = new Date(post.created_at).toLocaleDateString('ar-EG', { month:'short', day:'numeric' });
-        return `<div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-            <p class="text-sm text-gray-700 leading-relaxed">${esc(post.content)}</p>
-            <div class="flex items-center justify-between mt-3">
-                <span class="text-xs text-gray-400">${date}</span>
-                <button onclick="deletePost('${post.id}')" class="text-xs text-red-400 hover:text-red-600"><i class="fa-solid fa-trash ml-1"></i>حذف</button>
+    listEl.innerHTML = myPosts.map(p => {
+        const net = (p.upvotes||0)-(p.downvotes||0);
+        return `<div class="card" style="padding:16px">
+            <p style="font-size:.87rem;line-height:1.65;color:#2a2a2a;margin:0 0 10px;white-space:pre-wrap">${esc(p.content)}</p>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:.72rem;color:var(--muted)">${fmtDate(p.created_at)}</span>
+                <div style="display:flex;gap:10px;align-items:center">
+                    <span style="font-size:.75rem;color:var(--muted);font-weight:700">
+                        <i class="fa-solid fa-arrow-up" style="color:#22c55e"></i> ${p.upvotes||0}
+                    </span>
+                    <button onclick="deletePost('${p.id}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:.8rem">
+                        <i class="fa-regular fa-trash-can"></i>
+                    </button>
+                </div>
             </div>
         </div>`;
     }).join('');
@@ -294,18 +384,23 @@ function renderProfilePage() {
 async function updateStats() {
     const postsEl = document.getElementById('stat-posts');
     const roomsEl = document.getElementById('stat-rooms');
-    if (postsEl) postsEl.textContent = formatNumber(allPostsCache.length);
+    if (postsEl) postsEl.textContent = fmtNum(allPostsCache.length);
     if (roomsEl) {
-        const { count } = await db.from('audio_rooms').select('*', { count:'exact', head:true }).eq('is_active', true);
-        roomsEl.textContent = formatNumber(count || 0);
+        const { count } = await db.from('audio_rooms')
+            .select('id', { count:'exact', head:true })
+            .eq('is_active', true);
+        roomsEl.textContent = fmtNum(count || 0);
     }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// AUDIO ROOMS — CLUBHOUSE STYLE
+// AUDIO ROOMS — CLUBHOUSE PREMIUM
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchRooms() {
-    const { data, error } = await db.from('audio_rooms').select('*').eq('is_active', true).order('created_at', { ascending: false });
+    const { data, error } = await db.from('audio_rooms')
+        .select('id, title, host_id, host_name, is_active, created_at')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
     if (error) { console.error('fetchRooms:', error); return; }
     renderRooms(data || []);
     updateStats();
@@ -316,384 +411,293 @@ function renderRooms(rooms) {
     const empty = document.getElementById('rooms-empty-state');
     if (!grid) return;
 
-    const active = rooms.filter(r => r.is_active);
-
-    if (active.length === 0) {
+    if (!rooms.length) {
         grid.innerHTML = '';
-        if (empty) empty.style.display = 'block';
+        empty?.classList.remove('hidden');
         return;
     }
-    if (empty) empty.style.display = 'none';
+    empty?.classList.add('hidden');
 
-    const colors = ['#6366f1','#8b5cf6','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#14b8a6'];
-    const getColor   = (name) => colors[Math.abs(Array.from(name||'A').reduce((a,c)=>a+c.charCodeAt(0),0)) % colors.length];
-    const getInitial = (name) => (name||'?')[0].toUpperCase();
-
-    grid.innerHTML = active.map(room => {
-        const speakers  = room.speakers  || [];
-        const listeners = room.listeners || [];
-        const total     = room.participants_count || (speakers.length + listeners.length) || 0;
-        const hostName  = speakers[0]?.name || room.host_name || 'المضيف';
-
-        const speakersHTML = speakers.slice(0,4).map(sp => {
-            const color = getColor(sp.name);
-            return `<div style="text-align:center">
-                <div style="width:52px;height:52px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:800;color:#fff;margin:0 auto 6px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.12)">${getInitial(sp.name)}</div>
-                <div style="font-size:0.68rem;color:#555;font-weight:600;max-width:56px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(sp.name||'')}</div>
-            </div>`;
-        }).join('');
-
-        const listenersHTML = listeners.slice(0,8).map(li => {
-            const color = getColor(li.name);
-            return `<div style="width:34px;height:34px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:700;color:#fff;border:2px solid #fff" title="${esc(li.name||'')}">${getInitial(li.name)}</div>`;
-        }).join('');
-
-        return `<div class="ch-room-card" onclick="joinRoom('${room.id}','${esc(room.title).replace(/'/g,"\\'")}','${room.host_id}')">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
-                <div style="flex:1">
-                    <h3 style="font-size:1rem;font-weight:800;color:#1a1a1a;margin:0 0 5px;line-height:1.35">${esc(room.title)}</h3>
-                    <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:20px;font-weight:700;font-size:0.66rem">🎤 ${esc(hostName)}</span>
+    grid.innerHTML = rooms.map(room => {
+        const hostName = room.host_name || 'المضيف';
+        const age      = fmtDate(room.created_at);
+        return `<div class="room-card card-hover" onclick="joinRoom('${room.id}','${esc(room.title).replace(/'/g,"\\'")}','${room.host_id}')">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px">
+                <div style="flex:1;min-width:0">
+                    <h3 style="font-size:1rem;font-weight:800;color:var(--dark);margin:0 0 8px;line-height:1.4">${esc(room.title)}</h3>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        ${avatar(hostName,'av-sm')}
+                        <span class="badge badge-host">🎤 ${esc(hostName)}</span>
+                        <span style="font-size:.7rem;color:var(--muted)">${age}</span>
+                    </div>
                 </div>
-                <div style="display:flex;align-items:center;gap:4px;background:#fef2f2;border-radius:20px;padding:4px 10px;flex-shrink:0">
+                <span class="badge badge-live">
                     <span style="width:6px;height:6px;background:#ef4444;border-radius:50%;animation:blink 1.2s infinite;display:inline-block"></span>
-                    <span style="font-size:0.7rem;font-weight:700;color:#dc2626">مباشر</span>
-                </div>
+                    مباشر
+                </span>
             </div>
-            ${speakersHTML ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">${speakersHTML}</div>` : ''}
-            <div style="height:1px;background:#f5f5f5;margin:12px 0"></div>
+            <div class="divider" style="margin:12px 0"></div>
             <div style="display:flex;align-items:center;justify-content:space-between">
-                <div style="display:flex;gap:4px">${listenersHTML}</div>
-                <div style="font-size:0.75rem;color:#aaa;font-weight:600"><i class="fa-solid fa-headphones" style="color:#d4a574;margin-left:4px"></i>${total} مشارك</div>
+                <span style="font-size:.78rem;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px">
+                    <i class="fa-solid fa-headphones" style="color:var(--accent)"></i>
+                    انقر للانضمام
+                </span>
+                <div style="background:var(--accent);color:#fff;padding:7px 16px;border-radius:20px;font-size:.75rem;font-weight:800;display:flex;align-items:center;gap:6px">
+                    <i class="fa-solid fa-microphone"></i> دخول
+                </div>
             </div>
         </div>`;
     }).join('');
+}
+
+// ── Create Room Modal ──
+function showCreateRoomModal() {
+    if (!currentUser) { openAuthModal(); return; }
+    document.getElementById('create-room-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('room-title-input')?.focus(), 300);
+}
+function hideCreateRoomModal() {
+    document.getElementById('create-room-modal').classList.add('hidden');
+}
+function outsideCloseRoom(e) {
+    if (e.target.id === 'create-room-modal') hideCreateRoomModal();
 }
 
 async function createNewAudioRoom() {
     if (!currentUser) { openAuthModal(); return; }
     const input = document.getElementById('room-title-input');
     const title = input?.value?.trim();
-    if (!title) return showStatusMessage('أدخل عنوان المجلس أولاً', 'error');
+    if (!title) return toast('أدخل عنوان المجلس', 'error');
+
+    const btn = document.querySelector('#create-room-modal .btn-accent');
+    if (btn) { btn.textContent = '...'; btn.disabled = true; }
 
     const name = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مضيف';
+
+    // ✅ Only send columns that exist in the schema
     const { data, error } = await db.from('audio_rooms').insert({
         title,
-        host_id: currentUser.id,
+        host_id:   currentUser.id,
         host_name: name,
         is_active: true,
-        participants_count: 1,
-    }).select().single();
+    }).select('id, title, host_id').single();
 
-    if (error) return showStatusMessage('فشل إنشاء الغرفة: ' + error.message, 'error');
+    if (btn) { btn.innerHTML = 'ابدأ الآن 🚀'; btn.disabled = false; }
+    if (error) return toast('فشل إنشاء الغرفة: ' + error.message, 'error');
+
     if (input) input.value = '';
     hideCreateRoomModal();
-    showStatusMessage('تم إطلاق المجلس! 🚀', 'success');
+    toast('تم إطلاق المجلس! 🚀', 'success');
     await fetchRooms();
     if (data) joinRoom(data.id, data.title, data.host_id);
 }
 
-// ── Clubhouse Modal ──
-function showCreateRoomModal() {
-    if (!currentUser) { openAuthModal(); return; }
-    const modal = document.getElementById('create-room-modal');
-    if (modal) modal.style.display = 'flex';
-}
-
-function hideCreateRoomModal(event) {
-    const modal = document.getElementById('create-room-modal');
-    if (!modal) return;
-    if (event && event.target !== modal) return;
-    modal.style.display = 'none';
-}
-
-function raiseHand() {
-    const btn = document.getElementById('raise-hand-btn');
-    if (!btn) return;
-    const isRaised = btn.dataset.raised === 'true';
-    if (isRaised) {
-        btn.style.background = 'rgba(255,255,255,.08)';
-        btn.style.border = 'none';
-        btn.dataset.raised = 'false';
-        showStatusMessage('أنزلت يدك', 'info');
-    } else {
-        btn.style.background = 'rgba(249,168,37,0.25)';
-        btn.style.border = '2px solid rgba(249,168,37,0.5)';
-        btn.dataset.raised = 'true';
-        showStatusMessage('رفعت يدك ✋', 'success');
-    }
-}
-
-// ── Join / Leave ──
+// ── Join Room ──
 async function joinRoom(roomId, title, hostId) {
     if (!currentUser) return openAuthModal();
-    if (currentRoom) await leaveCurrentAudioRoom();
+    if (currentRoom) await leaveCurrentAudioRoom(true);
 
     const userName = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
     const roomName = `room_${roomId}`;
 
     try {
-        const tokenRes = await fetch('/api/livekit-token', {
-            method: 'POST',
+        const res = await fetch('/api/livekit-token', {
+            method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ roomName, participantName: userName })
+            body:    JSON.stringify({ roomName, participantName: userName }),
         });
-        if (!tokenRes.ok) {
-            let errMsg = `HTTP ${tokenRes.status}`;
-            try { const d = await tokenRes.json(); errMsg = d.error || errMsg; } catch(e){}
-            throw new Error(errMsg);
+        if (!res.ok) {
+            const d = await res.json().catch(()=>({}));
+            throw new Error(d.error || `HTTP ${res.status}`);
         }
-        const { token, wsUrl } = await tokenRes.json();
+        const { token, wsUrl } = await res.json();
 
-        const room = new LivekitClient.Room();
+        const room = new LivekitClient.Room({
+            adaptiveStream:  true,
+            dynacast:        true,
+        });
 
-        room.on('trackSubscribed', (track, _pub, _participant) => {
-            if (track.kind === 'audio') {
-                const audio = new Audio();
-                track.attach(audio);
-                audio.play().catch(e => console.warn('Autoplay:', e));
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+            if (track.kind === LivekitClient.Track.Kind.Audio) {
+                const audio = track.attach();
+                audio.play().catch(()=>{});
             }
         });
+        room.on(LivekitClient.RoomEvent.ParticipantConnected,    () => refreshRoomUI(room));
+        room.on(LivekitClient.RoomEvent.ParticipantDisconnected, () => refreshRoomUI(room));
+        room.on(LivekitClient.RoomEvent.TrackMuted,              () => refreshRoomUI(room));
+        room.on(LivekitClient.RoomEvent.TrackUnmuted,            () => refreshRoomUI(room));
 
         await room.connect(wsUrl, token);
 
         try {
-            await room.localParticipant.setMicrophoneEnabled(true);
-        } catch(micErr) {
-            console.error('Mic error:', micErr);
-            showStatusMessage('تعذر الوصول للميكروفون — تحقق من الأذونات', 'error');
-        }
+            await room.localParticipant.setMicrophoneEnabled(false); // start muted
+        } catch(e) { console.warn('mic:', e); }
 
         currentRoom       = room;
         currentRoomId     = roomId;
         currentRoomHostId = hostId;
-        isCurrentUserHost = (currentUser.id === hostId);
+        isCurrentUserHost = currentUser.id === hostId;
 
-        document.getElementById('active-room-title').textContent = title;
-        document.getElementById('active-room-role').textContent  = isCurrentUserHost ? 'دورك: مضيف 👑' : 'دورك: مستمع';
-
+        // Show panel
         const panel = document.getElementById('active-room-panel');
-        if (panel) { panel.style.display = 'flex'; panel.style.flexDirection = 'column'; }
+        panel.classList.remove('hidden');
         document.body.style.overflow = 'hidden';
 
+        document.getElementById('active-room-title').textContent = title;
+        document.getElementById('active-room-role').textContent  =
+            isCurrentUserHost ? 'أنت المضيف 👑' : 'مستمع في الجمهور';
+
         const closeBtn = document.getElementById('close-active-room-btn');
-        if (closeBtn) closeBtn.style.display = isCurrentUserHost ? 'block' : 'none';
+        if (closeBtn) closeBtn.style.display = isCurrentUserHost ? 'inline-flex' : 'none';
 
-        updateParticipantsList(room);
-        updateMicButtonState();
+        updateMicBtn();
+        refreshRoomUI(room);
 
-        room.on('participantConnected',    () => updateParticipantsList(room));
-        room.on('participantDisconnected', () => updateParticipantsList(room));
-        room.on('trackSubscribed',         () => updateParticipantsList(room));
-        room.on('trackUnsubscribed',       () => updateParticipantsList(room));
+        window.addEventListener('beforeunload', quietLeave);
+        toast(`دخلت "${title}" 🎙️`, 'success');
 
-        window.addEventListener('beforeunload', () => { if (currentRoom) currentRoom.disconnect(); });
-        showStatusMessage(`دخلت إلى "${title}" 🎙️`, 'success');
     } catch(err) {
-        console.error('joinRoom error:', err);
-        showStatusMessage('تعذر الانضمام: ' + err.message, 'error');
+        console.error('joinRoom:', err);
+        toast('تعذر الانضمام: ' + err.message, 'error');
     }
 }
 
-function updateParticipantsList(room) {
-    const speakersGrid  = document.getElementById('speakers-grid');
-    const listenersGrid = document.getElementById('listeners-grid');
-    if (!speakersGrid || !listenersGrid) return;
-
-    const colors     = ['#6366f1','#8b5cf6','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#14b8a6'];
-    const getColor   = (name) => colors[Math.abs(Array.from(name||'A').reduce((a,c)=>a+c.charCodeAt(0),0)) % colors.length];
-    const getInitial = (name) => (name||'?')[0].toUpperCase();
+function refreshRoomUI(room) {
+    const speakersEl  = document.getElementById('speakers-grid');
+    const listenersEl = document.getElementById('listeners-grid');
+    if (!speakersEl || !listenersEl) return;
 
     const local   = room.localParticipant;
-    const remotes = Array.from(room.participants.values());
+    const remotes = Array.from(room.remoteParticipants?.values() || room.participants?.values() || []);
+
+    const mkParticipant = (identity, isMicOn, isLocal) => ({ identity, isMicOn, isLocal });
     const all = [
-        { identity: local.identity, isMicEnabled: local.isMicrophoneEnabled, isLocal: true },
-        ...remotes.map(p => ({ identity: p.identity, isMicEnabled: p.isMicrophoneEnabled, isLocal: false }))
+        mkParticipant(local.identity, local.isMicrophoneEnabled, true),
+        ...remotes.map(p => mkParticipant(p.identity, p.isMicrophoneEnabled, false)),
     ];
 
-    const speakers  = all.slice(0, Math.min(6, all.length));
-    const listeners = all.slice(Math.min(6, all.length));
+    // First 8 → stage (speakers). Rest → audience
+    const stageMax = Math.min(8, all.length);
+    const stage    = all.slice(0, stageMax);
+    const audience = all.slice(stageMax);
 
-    speakersGrid.innerHTML = speakers.map(p => {
-        const color   = getColor(p.identity);
-        const initial = getInitial(p.identity);
-        const ring    = p.isMicEnabled
-            ? 'border:3px solid #f9a825;animation:speakPulse 1.5s infinite;'
-            : 'border:3px solid rgba(255,255,255,.15);';
-        const micIcon = p.isMicEnabled
-            ? `<span style="position:absolute;bottom:2px;right:2px;width:18px;height:18px;border-radius:50%;background:#22c55e;border:2px solid #0f3460;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-microphone" style="font-size:8px;color:#fff"></i></span>`
-            : `<span style="position:absolute;bottom:2px;right:2px;width:18px;height:18px;border-radius:50%;background:#374151;border:2px solid #0f3460;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-microphone-slash" style="font-size:8px;color:#9ca3af"></i></span>`;
-        return `<div style="text-align:center;min-width:80px">
-            <div style="width:72px;height:72px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:900;color:#fff;margin:0 auto 8px;${ring}box-sizing:border-box;position:relative">${initial}${micIcon}</div>
-            <div style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,.9);max-width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0 auto">${esc(p.identity)}${p.isLocal ? ' 👤' : ''}</div>
-            ${p.isLocal && isCurrentUserHost ? `<div style="font-size:0.62rem;color:#f9a825;font-weight:700;margin-top:2px">مضيف 👑</div>` : ''}
+    speakersEl.innerHTML = stage.map(p => {
+        const c    = getColor(p.identity);
+        const init = getInitial(p.identity);
+        const spk  = p.isMicOn ? 'speaking' : '';
+        const micC = p.isMicOn ? 'on' : 'off';
+        const micI = p.isMicOn ? 'fa-microphone' : 'fa-microphone-slash';
+        return `<div class="speaker-bubble">
+            <div class="speaker-avatar ${spk}" style="background:${c}">
+                ${init}
+                <span class="speaker-mic ${micC}"><i class="fa-solid ${micI}" style="color:#fff;font-size:8px"></i></span>
+            </div>
+            <div style="font-size:.72rem;font-weight:700;color:rgba(255,255,255,.85);max-width:78px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                ${esc(p.identity)}${p.isLocal?' 👤':''}
+            </div>
+            ${p.isLocal && isCurrentUserHost ? '<div style="font-size:.6rem;color:#f59e0b;font-weight:800">مضيف 👑</div>' : ''}
         </div>`;
     }).join('');
 
-    listenersGrid.innerHTML = listeners.length > 0
-        ? listeners.map(p => {
-            const color   = getColor(p.identity);
-            const initial = getInitial(p.identity);
-            return `<div title="${esc(p.identity)}" style="text-align:center">
-                <div style="width:48px;height:48px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700;color:#fff;opacity:.85">${initial}</div>
-                <div style="font-size:0.62rem;color:rgba(255,255,255,.5);margin-top:4px;max-width:48px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.identity)}</div>
-            </div>`;
-          }).join('')
-        : `<div style="color:rgba(255,255,255,.35);font-size:0.8rem">لا يوجد جمهور بعد</div>`;
+    listenersEl.innerHTML = audience.length
+        ? audience.map(p => `<div class="listener-bubble" style="background:${getColor(p.identity)}" title="${esc(p.identity)}">${getInitial(p.identity)}</div>`).join('')
+        : '<span style="font-size:.78rem;color:rgba(255,255,255,.3)">الجمهور فارغ بعد</span>';
 }
 
-function updateMicButtonState() {
+// ── Mic ──
+function updateMicBtn() {
+    if (!currentRoom) return;
     const btn = document.getElementById('mute-btn');
-    if (!btn || !currentRoom) return;
+    if (!btn) return;
     const isOn = currentRoom.localParticipant.isMicrophoneEnabled;
-    btn.dataset.muted = !isOn;
-    btn.innerHTML = isOn ? '<i class="fa-solid fa-microphone"></i>' : '<i class="fa-solid fa-microphone-slash"></i>';
-    btn.style.background   = isOn ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,.12)';
-    btn.style.animation    = isOn ? 'micActive 1s infinite' : '';
+    btn.classList.toggle('active', isOn);
+    btn.innerHTML = isOn
+        ? '<i class="fa-solid fa-microphone"></i>'
+        : '<i class="fa-solid fa-microphone-slash"></i>';
 }
 
 async function toggleMic() {
     if (!currentRoom) return;
-    const newState = !currentRoom.localParticipant.isMicrophoneEnabled;
-    await currentRoom.localParticipant.setMicrophoneEnabled(newState);
-    updateMicButtonState();
-    updateParticipantsList(currentRoom);
+    try {
+        const next = !currentRoom.localParticipant.isMicrophoneEnabled;
+        await currentRoom.localParticipant.setMicrophoneEnabled(next);
+        updateMicBtn();
+        refreshRoomUI(currentRoom);
+        toast(next ? '🎙️ الميكروفون شغّال' : '🔇 الميكروفون معطّل', 'info');
+    } catch(e) { toast('تعذر التحكم في الميكروفون', 'error'); }
 }
 
-async function leaveCurrentAudioRoom() {
+// ── Raise hand ──
+function raiseHand() {
+    const btn = document.getElementById('raise-hand-btn');
+    if (!btn) return;
+    const raised = btn.classList.toggle('raised');
+    toast(raised ? '✋ رفعت يدك' : 'أنزلت يدك', 'info');
+}
+
+// ── Leave ──
+async function leaveCurrentAudioRoom(silent = false) {
     if (currentRoom) {
-        currentRoom.disconnect();
-        currentRoom = null;
-        currentRoomId = null;
-        currentRoomHostId = null;
-        isCurrentUserHost = false;
+        try { currentRoom.disconnect(); } catch(e) {}
+        currentRoom = null; currentRoomId = null; currentRoomHostId = null; isCurrentUserHost = false;
     }
+    window.removeEventListener('beforeunload', quietLeave);
     const panel = document.getElementById('active-room-panel');
-    if (panel) panel.style.display = 'none';
+    if (panel) panel.classList.add('hidden');
     document.body.style.overflow = '';
     const sg = document.getElementById('speakers-grid');
     const lg = document.getElementById('listeners-grid');
     if (sg) sg.innerHTML = '';
     if (lg) lg.innerHTML = '';
-}
-
-async function closeCurrentRoom() {
-    if (!currentRoomId) return;
-    if (!confirm('هل تريد إغلاق هذه الغرفة نهائياً؟')) return;
-    const { error } = await db.from('audio_rooms').update({ is_active: false }).eq('id', currentRoomId);
-    if (error) return showStatusMessage('فشل إغلاق الغرفة: ' + error.message, 'error');
-    await leaveCurrentAudioRoom();
+    if (!silent) toast('غادرت المجلس 👋', 'info');
     fetchRooms();
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// SANDBOX
-// ══════════════════════════════════════════════════════════════════════════════
-let sandboxController = null;
-
-async function runSandbox() {
-    const url   = document.getElementById('sandbox-repo-url')?.value?.trim();
-    const entry = document.getElementById('sandbox-entry-file')?.value?.trim();
-    const term  = document.getElementById('sandbox-terminal');
-    if (!url)  return showStatusMessage('أدخل رابط المستودع', 'error');
-    if (!term) return;
-
-    clearTerminal();
-    appendLog(term, 'info', `⟳ جارٍ الاتصال بـ: ${url}`);
-
-    sandboxController = new AbortController();
-    try {
-        const res = await fetch('/api/sandbox', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ repoUrl: url, entryFile: entry }),
-            signal: sandboxController.signal,
-        });
-        if (!res.body) throw new Error('No stream');
-        const reader = res.body.getReader();
-        const dec    = new TextDecoder();
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const lines = dec.decode(value).split('\n').filter(Boolean);
-            for (const line of lines) {
-                try {
-                    const obj = JSON.parse(line);
-                    appendLog(term, obj.type || 'log', obj.msg || line);
-                } catch { appendLog(term, 'log', line); }
-            }
-        }
-        appendLog(term, 'success', '✅ انتهى التشغيل');
-    } catch(err) {
-        if (err.name !== 'AbortError') appendLog(term, 'error', '❌ ' + err.message);
-    }
+function quietLeave() {
+    if (currentRoom) try { currentRoom.disconnect(); } catch(e) {}
 }
 
-function stopSandbox() {
-    if (sandboxController) { sandboxController.abort(); sandboxController = null; }
-    appendLog(document.getElementById('sandbox-terminal'), 'warn', '⏹ تم الإيقاف');
-}
-
-function appendLog(terminal, type, msg) {
-    if (!terminal) return;
-    const colors = { error:'#f87171', success:'#4ade80', warn:'#fbbf24', info:'#60a5fa', log:'#d1d5db' };
-    const div = document.createElement('div');
-    div.style.color = colors[type] || colors.log;
-    div.textContent = msg;
-    terminal.appendChild(div);
-    terminal.scrollTop = terminal.scrollHeight;
-}
-
-function clearTerminal() {
-    const term = document.getElementById('sandbox-terminal');
-    if (term) term.innerHTML = '<div style="color:#4ade80">● Pulse Sandbox جاهز.</div>';
+async function closeCurrentRoom() {
+    if (!currentRoomId || !isCurrentUserHost) return;
+    if (!confirm('إغلاق الغرفة نهائياً؟')) return;
+    const { error } = await db.from('audio_rooms')
+        .update({ is_active: false })
+        .eq('id', currentRoomId);
+    if (error) return toast('فشل الإغلاق: ' + error.message, 'error');
+    await leaveCurrentAudioRoom();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // GLOBAL EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
-window.navigateTo            = navigateTo;
-window.openAuthModal         = openAuthModal;
-window.closeAuthModal        = closeAuthModal;
-window.switchToSignup        = switchToSignup;
-window.switchToLogin         = switchToLogin;
-window.handleLogin           = handleLogin;
-window.handleSignup          = handleSignup;
-window.handleLogout          = handleLogout;
-window.createPost            = createPost;
-window.handleVote            = handleVote;
-window.submitComment         = submitComment;
-window.deletePost            = deletePost;
-window.fetchRooms            = fetchRooms;
-window.createNewAudioRoom    = createNewAudioRoom;
-window.showCreateRoomModal   = showCreateRoomModal;
-window.hideCreateRoomModal   = hideCreateRoomModal;
-window.joinRoom              = joinRoom;
-window.leaveCurrentAudioRoom = leaveCurrentAudioRoom;
-window.closeCurrentRoom      = closeCurrentRoom;
-window.toggleMic             = toggleMic;
-window.raiseHand             = raiseHand;
-window.runSandbox            = runSandbox;
-window.stopSandbox           = stopSandbox;
-window.clearTerminal         = clearTerminal;
+Object.assign(window, {
+    navigateTo, openAuthModal, closeAuthModal, outsideCloseAuth,
+    switchToSignup, switchToLogin, handleLogin, handleSignup, handleLogout,
+    createPost, handleVote, deletePost, switchTab, filterByTag,
+    fetchRooms, showCreateRoomModal, hideCreateRoomModal, outsideCloseRoom,
+    createNewAudioRoom, joinRoom, leaveCurrentAudioRoom, closeCurrentRoom,
+    toggleMic, raiseHand,
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BOOT
 // ══════════════════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
-    // تحقق من جلسة موجودة
     const { data: { session } } = await db.auth.getSession();
     currentUser = session?.user ?? null;
     updateUIForAuth();
-
-    document.getElementById('post-submit-btn')?.addEventListener('click', createPost);
-
     fetchPosts();
 
-    // إغلاق مودال الغرفة بـ Escape أو النقر على الخلفية
-    document.addEventListener('keydown', (e) => {
+    document.getElementById('post-submit-btn')
+        ?.addEventListener('click', createPost);
+
+    document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
-            const modal = document.getElementById('create-room-modal');
-            if (modal && modal.style.display === 'flex') modal.style.display = 'none';
+            if (!document.getElementById('create-room-modal')?.classList.contains('hidden'))
+                hideCreateRoomModal();
+            if (!document.getElementById('auth-modal')?.classList.contains('hidden'))
+                closeAuthModal();
         }
     });
 });
