@@ -17,6 +17,59 @@
         @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
         .fade-in { animation: fadeIn .25s ease both; }
         .participant-item { transition: background 0.1s ease; }
+
+        /* ── Clubhouse Room Animations ── */
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity:0; }
+            to   { transform: translateY(0);    opacity:1; }
+        }
+        @keyframes fadeInRoom {
+            from { opacity:0; transform:scale(1.02); }
+            to   { opacity:1; transform:scale(1); }
+        }
+        @keyframes blink {
+            0%,100% { opacity:1; } 50% { opacity:.3; }
+        }
+        @keyframes speakPulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(249,168,37,0.7); }
+            50%      { box-shadow: 0 0 0 10px rgba(249,168,37,0); }
+        }
+        @keyframes micActive {
+            0%,100% { box-shadow:0 0 0 0 rgba(34,197,94,0.7); }
+            50%      { box-shadow:0 0 0 8px rgba(34,197,94,0); }
+        }
+
+        /* ── كارد الغرفة (Clubhouse card) ── */
+        .ch-room-card {
+            background:#fff;
+            border-radius:22px;
+            padding:20px 22px 18px;
+            border:1px solid #f0ede8;
+            cursor:pointer;
+            transition:transform .2s, box-shadow .2s;
+        }
+        .ch-room-card:hover {
+            transform:translateY(-3px);
+            box-shadow:0 12px 30px rgba(0,0,0,0.08);
+        }
+        .ch-avatar-speaker {
+            width:72px; height:72px; border-radius:50%;
+            display:flex; align-items:center; justify-content:center;
+            font-size:1.5rem; font-weight:900; color:#fff;
+            flex-direction:column; gap:4px;
+        }
+        .ch-avatar-listener {
+            width:48px; height:48px; border-radius:50%;
+            display:flex; align-items:center; justify-content:center;
+            font-size:1rem; font-weight:700; color:#fff;
+        }
+        .ch-avatar-small {
+            width:40px; height:40px; border-radius:50%;
+            display:flex; align-items:center; justify-content:center;
+            font-size:0.9rem; font-weight:700; color:#fff;
+        }
+        .ch-mic-active { animation: speakPulse 1.5s infinite; }
+        .mute-active   { animation: micActive 1s infinite; }
     </style>
 </head>
 <body class="min-h-full antialiased">
@@ -160,57 +213,109 @@
         </section>
 
         <!-- ════ ROOMS VIEW (صوتية متقدمة مع LiveKit) ════ -->
-        <section id="rooms-view" class="hidden space-y-4 fade-in">
-            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
-                <h2 class="text-xl font-black text-black flex items-center gap-2">
-                    <i class="fa-solid fa-tower-broadcast text-red-500"></i> المجالس الصوتية المباشرة
-                </h2>
+        <!-- ════ ROOMS VIEW — Clubhouse Style ════ -->
+        <section id="rooms-view" class="hidden fade-in" style="direction:rtl">
 
-                <!-- إنشاء غرفة -->
-                <div class="flex flex-col sm:flex-row gap-2">
-                    <input type="text" id="room-title-input"
-                        placeholder="عنوان الجلسة (مثال: نقاش حار عن التقنية)..."
-                        class="flex-1 p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
-                    <button onclick="createNewAudioRoom()"
-                        class="bg-black text-white px-5 py-3 rounded-xl font-bold hover:bg-gray-800 transition text-sm whitespace-nowrap">
-                        <i class="fa-solid fa-plus ml-1"></i> إطلاق غرفة
-                    </button>
+            <!-- ── هيدر الغرف ── -->
+            <div style="background:#fff;border-radius:20px;padding:20px 24px;border:1px solid #f0ede8;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+                <div>
+                    <h2 style="font-size:1.25rem;font-weight:900;color:#1a1a1a;margin:0;display:flex;align-items:center;gap:8px">
+                        🎙️ المجالس الصوتية
+                    </h2>
+                    <p style="font-size:0.75rem;color:#888;margin:4px 0 0">انضم للنقاشات المباشرة واستمع للأصوات الحية</p>
                 </div>
+                <button onclick="showCreateRoomModal()" id="open-create-room-btn"
+                    style="background:linear-gradient(135deg,#f9a825,#ff6f00);color:#fff;border:none;padding:10px 20px;border-radius:14px;font-weight:800;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:6px;box-shadow:0 4px 14px rgba(249,168,37,0.4)">
+                    <i class="fa-solid fa-plus"></i> إطلاق مجلس
+                </button>
+            </div>
 
-                <!-- لوحة الغرفة النشطة (تظهر عند الانضمام) -->
-                <div id="active-room-panel" class="hidden bg-gray-900 text-white p-5 rounded-xl shadow-lg">
-                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                        <div>
-                            <span class="bg-red-600 text-white text-xs px-2 py-1 rounded-md font-bold mb-2 inline-flex items-center gap-1">
-                                <span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span> مباشر الآن
-                            </span>
-                            <h3 id="active-room-title" class="text-base font-bold mt-1">—</h3>
-                            <p id="active-room-role" class="text-xs text-gray-400 mt-0.5">دورك: مستمع</p>
-                        </div>
-                        <div class="flex gap-2">
-                            <button id="mute-btn" onclick="toggleMic()" data-muted="true"
-                                class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-xl font-bold text-xs transition">
-                                <i class="fa-solid fa-microphone-slash ml-1"></i> كتم
-                            </button>
-                            <button id="close-active-room-btn" onclick="closeCurrentRoom()"
-                                class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-bold text-xs transition hidden">
-                                <i class="fa-solid fa-door-closed ml-1"></i> إغلاق الغرفة
-                            </button>
-                            <button onclick="leaveCurrentAudioRoom()"
-                                class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-bold text-xs transition">
-                                <i class="fa-solid fa-phone-slash ml-1"></i> مغادرة
-                            </button>
-                        </div>
-                    </div>
-                    <!-- قائمة المشاركين (تحديث فوري) -->
-                    <div id="room-participants-list" class="mt-4 space-y-2 max-h-48 overflow-y-auto text-sm border-t border-gray-700 pt-3">
-                        <div class="text-gray-400 text-sm text-center">لم تنضم إلى أي غرفة</div>
+            <!-- ── مودال إنشاء الغرفة ── -->
+            <div id="create-room-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);z-index:200;align-items:flex-end;justify-content:center" onclick="hideCreateRoomModal(event)">
+                <div style="background:#fff;border-radius:28px 28px 0 0;padding:28px 24px 40px;width:100%;max-width:520px;animation:slideUp .35s cubic-bezier(.34,1.56,.64,1)">
+                    <div style="width:40px;height:4px;background:#e0e0e0;border-radius:4px;margin:0 auto 20px"></div>
+                    <h3 style="font-size:1.1rem;font-weight:900;color:#1a1a1a;margin:0 0 16px;text-align:center">أطلق مجلساً جديداً 🚀</h3>
+                    <input type="text" id="room-title-input" placeholder="عنوان المجلس... (مثال: نقاش التقنية والمستقبل)"
+                        style="width:100%;padding:14px 16px;border:2px solid #f0ede8;border-radius:14px;font-size:0.9rem;background:#fafafa;outline:none;box-sizing:border-box;font-family:inherit;color:#1a1a1a"
+                        onfocus="this.style.borderColor='#f9a825'" onblur="this.style.borderColor='#f0ede8'">
+                    <div style="display:flex;gap:10px;margin-top:14px">
+                        <button onclick="hideCreateRoomModal()" style="flex:1;padding:13px;border:2px solid #eee;border-radius:14px;background:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;color:#666">إلغاء</button>
+                        <button onclick="createNewAudioRoom()" style="flex:2;padding:13px;background:linear-gradient(135deg,#f9a825,#ff6f00);color:#fff;border:none;border-radius:14px;font-weight:800;font-size:0.9rem;cursor:pointer;box-shadow:0 4px 14px rgba(249,168,37,0.4)">ابدأ الآن ✨</button>
                     </div>
                 </div>
             </div>
 
-            <!-- شبكة الغرف المتاحة -->
-            <div id="rooms-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
+            <!-- ── لوحة الغرفة النشطة (كلوب هاوس full screen) ── -->
+            <div id="active-room-panel" style="display:none;position:fixed;inset:0;z-index:150;background:linear-gradient(160deg,#1a1a2e 0%,#16213e 40%,#0f3460 100%);color:#fff;overflow-y:auto;animation:fadeInRoom .4s ease">
+                <div style="max-width:600px;margin:0 auto;padding:24px 20px 120px">
+
+                    <!-- هيدر الغرفة -->
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                        <button onclick="leaveCurrentAudioRoom()" style="background:rgba(255,255,255,.1);border:none;color:#fff;padding:8px 16px;border-radius:30px;font-weight:700;font-size:0.8rem;cursor:pointer;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px)">
+                            <i class="fa-solid fa-chevron-down"></i> مغادرة بهدوء
+                        </button>
+                        <span style="background:rgba(239,68,68,0.2);color:#f87171;border:1px solid rgba(239,68,68,.3);padding:4px 12px;border-radius:20px;font-size:0.7rem;font-weight:800;display:flex;align-items:center;gap:5px">
+                            <span style="width:6px;height:6px;background:#ef4444;border-radius:50%;animation:blink 1.2s infinite"></span> مباشر
+                        </span>
+                        <button id="close-active-room-btn" onclick="closeCurrentRoom()" style="display:none;background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.3);color:#f87171;padding:8px 16px;border-radius:30px;font-weight:700;font-size:0.8rem;cursor:pointer">
+                            <i class="fa-solid fa-door-closed"></i> إغلاق الغرفة
+                        </button>
+                    </div>
+
+                    <!-- عنوان الغرفة -->
+                    <div style="text-align:center;margin:28px 0">
+                        <div style="font-size:1.6rem;font-weight:900;color:#fff;line-height:1.3" id="active-room-title">—</div>
+                        <div style="margin-top:8px;font-size:0.8rem;color:rgba(255,255,255,.5)" id="active-room-role">دورك: مستمع</div>
+                    </div>
+
+                    <!-- المتحدثون (الدائرات الكبيرة) -->
+                    <div style="margin-bottom:24px">
+                        <p style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;margin:0 0 16px">المتحدثون</p>
+                        <div id="speakers-grid" style="display:flex;flex-wrap:wrap;gap:20px;justify-content:center"></div>
+                    </div>
+
+                    <!-- فاصل -->
+                    <div style="height:1px;background:rgba(255,255,255,.08);margin:20px 0"></div>
+
+                    <!-- المستمعون (دوائر أصغر) -->
+                    <div>
+                        <p style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;margin:0 0 16px">في الجمهور</p>
+                        <div id="listeners-grid" style="display:flex;flex-wrap:wrap;gap:12px"></div>
+                    </div>
+
+                    <!-- hidden container for backward compat -->
+                    <div id="room-participants-list" style="display:none"></div>
+                </div>
+
+                <!-- شريط التحكم السفلي -->
+                <div style="position:fixed;bottom:0;left:0;right:0;background:rgba(15,20,40,0.95);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,.08);padding:16px 24px 28px">
+                    <div style="max-width:600px;margin:0 auto;display:flex;align-items:center;justify-content:center;gap:24px">
+                        <button id="mute-btn" onclick="toggleMic()" data-muted="true"
+                            style="width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.3rem;background:rgba(255,255,255,.12);color:#fff;position:relative">
+                            <i class="fa-solid fa-microphone-slash"></i>
+                        </button>
+                        <button onclick="raiseHand()" id="raise-hand-btn"
+                            style="width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.1rem;background:rgba(255,255,255,.08);color:rgba(255,255,255,.7)">
+                            ✋
+                        </button>
+                        <button onclick="leaveCurrentAudioRoom()"
+                            style="padding:14px 24px;background:#ef4444;border:none;border-radius:30px;color:#fff;font-weight:800;font-size:0.85rem;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(239,68,68,.4)">
+                            <i class="fa-solid fa-phone-slash"></i> مغادرة
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── شبكة الغرف المتاحة ── -->
+            <div id="rooms-grid" style="display:grid;grid-template-columns:1fr;gap:14px"></div>
+
+            <!-- حالة فارغة -->
+            <div id="rooms-empty-state" style="display:none;text-align:center;padding:60px 20px">
+                <div style="font-size:3rem;margin-bottom:16px">🎙️</div>
+                <h3 style="font-size:1.1rem;font-weight:800;color:#1a1a1a;margin:0 0 8px">لا توجد مجالس نشطة</h3>
+                <p style="font-size:0.85rem;color:#888;margin:0 0 20px">كن أول من يطلق مجلساً اليوم!</p>
+                <button onclick="showCreateRoomModal()" style="background:linear-gradient(135deg,#f9a825,#ff6f00);color:#fff;border:none;padding:12px 24px;border-radius:14px;font-weight:800;font-size:0.85rem;cursor:pointer">ابدأ مجلساً جديداً</button>
+            </div>
         </section>
 
         <!-- ════ SANDBOX VIEW ════ -->
