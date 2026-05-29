@@ -1,773 +1,646 @@
-// ══════════════════════════════════════════════════════════════════════════════
-// Pulse Live — Frontend Engine v4.0 (معدّل لتشخيص الأخطاء)
-// ══════════════════════════════════════════════════════════════════════════════
-
-const SUPABASE_URL      = 'https://jnwqokkzywrctdjsdzbl.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impud3Fva2t6eXdyY3RkanNkemJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4MTkxOTYsImV4cCI6MjA5NTM5NTE5Nn0.8RkJ2A1oJ9DaSD0Y8CdiNwvcfcr7iWyQZf5eKD3kpAo';
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// ── Global state ──
-let currentUser       = null;
-let allPostsCache     = [];
-let myVotesCache      = {};
-let currentTab        = 'latest';
-let currentRoom       = null;
-let currentRoomId     = null;
-let currentRoomHostId = null;
-let isCurrentUserHost = false;
-let scrollY           = 0;
-
-// ── Palette ──
-const COLORS     = ['#6366f1','#8b5cf6','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#14b8a6','#f97316','#06b6d4'];
-const getColor   = s => COLORS[Math.abs(Array.from(s||'A').reduce((a,c)=>a+c.charCodeAt(0),0))%COLORS.length];
-const getInitial = s => (s||'?')[0].toUpperCase();
-
-// ══════════════════════════════════════════════════════════════════════════════
-// UTILS
-// ══════════════════════════════════════════════════════════════════════════════
-function esc(s) {
-    if (!s) return '';
-    return String(s)
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function fmtNum(n) {
-    n = Number(n) || 0;
-    if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
-    if (n >= 1e3) return (n/1e3).toFixed(1)+'k';
-    return String(n);
-}
-
-function fmtDate(iso) {
-    if (!iso) return '';
-    const sec = Math.floor((Date.now() - new Date(iso)) / 1000);
-    if (sec < 60)    return 'الآن';
-    if (sec < 3600)  return `${Math.floor(sec/60)} د`;
-    if (sec < 86400) return `${Math.floor(sec/3600)} س`;
-    return new Date(iso).toLocaleDateString('ar-EG',{month:'short',day:'numeric'});
-}
-
-function toast(msg, type='info') {
-    const el = document.getElementById('status-msg');
-    if (!el) return;
-    el.textContent = msg;
-    el.style.background = type==='success'?'#16a34a':type==='error'?'#dc2626':'#0f0f0f';
-    el.classList.remove('hidden');
-    clearTimeout(el._t);
-    el._t = setTimeout(()=>el.classList.add('hidden'), 5000);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// AUTH مع تحسين الجلسة
-// ══════════════════════════════════════════════════════════════════════════════
-function openAuthModal()  { document.getElementById('auth-modal').classList.remove('hidden'); }
-function closeAuthModal() { document.getElementById('auth-modal').classList.add('hidden'); }
-function outsideCloseAuth(e) { if (e.target.id==='auth-modal') closeAuthModal(); }
-
-function switchToSignup() {
-    document.getElementById('login-form').classList.add('hidden');
-    document.getElementById('signup-form').classList.remove('hidden');
-    document.getElementById('auth-modal-title').textContent = 'إنشاء حساب';
-}
-function switchToLogin() {
-    document.getElementById('signup-form').classList.add('hidden');
-    document.getElementById('login-form').classList.remove('hidden');
-    document.getElementById('auth-modal-title').textContent = 'تسجيل الدخول';
-}
-
-async function handleLogin() {
-    const email    = document.getElementById('login-email')?.value?.trim();
-    const password = document.getElementById('login-password')?.value;
-    if (!email || !password) return toast('أدخل البريد وكلمة المرور', 'error');
-    const btn = document.querySelector('#login-form .btn');
-    if (btn) { btn.textContent='...'; btn.disabled=true; }
-    const { data, error } = await db.auth.signInWithPassword({ email, password });
-    if (btn) { btn.innerHTML='دخول <i class="fa-solid fa-arrow-left"></i>'; btn.disabled=false; }
-    if (error) {
-        console.error('Login error:', error);
-        return toast(error.message, 'error');
-    }
-    console.log('Login success:', data.user);
-    currentUser = data.user;
-    updateUIForAuth();
-    closeAuthModal();
-    toast('أهلاً بك! 🎉', 'success');
-    await fetchPosts();
-    await fetchMyVotes();
-}
-
-async function handleSignup() {
-    const name     = document.getElementById('signup-name')?.value?.trim();
-    const email    = document.getElementById('signup-email')?.value?.trim();
-    const password = document.getElementById('signup-password')?.value;
-    if (!name||!email||!password) return toast('يرجى تعبئة جميع الحقول','error');
-    if (password.length<6) return toast('كلمة المرور 6 أحرف على الأقل','error');
-    const btn = document.querySelector('#signup-form .btn');
-    if (btn) { btn.textContent='...'; btn.disabled=true; }
-    const { data, error } = await db.auth.signUp({ 
-        email, 
-        password, 
-        options: { data: { full_name: name } } 
-    });
-    if (btn) { btn.innerHTML='إنشاء الحساب ✨'; btn.disabled=false; }
-    if (error) {
-        console.error('Signup error:', error);
-        return toast(error.message,'error');
-    }
-    console.log('Signup success:', data);
-    if (data.user) {
-        currentUser = data.user;
-        updateUIForAuth();
-    }
-    closeAuthModal();
-    toast('مرحباً بك في Pulse! 🎊','success');
-    await fetchPosts();
-}
-
-async function handleLogout() {
-    await db.auth.signOut();
-    currentUser = null;
-    myVotesCache = {};
-    updateUIForAuth();
-    navigateTo('timeline');
-    toast('إلى اللقاء! 👋','info');
-}
-
-db.auth.onAuthStateChange(async (event, session) => {
-    console.log('Auth state change:', event, session?.user?.email);
-    currentUser = session?.user ?? null;
-    updateUIForAuth();
-    if (event === 'SIGNED_IN') {
-        await fetchPosts();
-        await fetchMyVotes();
-    }
-    if (event === 'SIGNED_OUT') {
-        allPostsCache = [];
-        renderTimeline();
-    }
-});
-
-function updateUIForAuth() {
-    const on = !!currentUser;
-    document.getElementById('auth-toggle-btn')?.classList.toggle('hidden', on);
-    document.getElementById('user-profile-card')?.classList.toggle('hidden', !on);
-    document.getElementById('composer-logged-in')?.classList.toggle('hidden', !on);
-    document.getElementById('composer-logged-out')?.classList.toggle('hidden', on);
-
-    if (on && currentUser) {
-        const name = displayName();
-        const c    = getColor(name);
-        const set  = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
-        const css  = (id,p,v)=>{ const el=document.getElementById(id); if(el) el.style[p]=v; };
-        set('user-display-name', name);
-        set('user-email-display', currentUser.email||'');
-        set('user-avatar-letter', getInitial(name));
-        set('composer-avatar', getInitial(name));
-        css('user-avatar-letter','background',c);
-        css('composer-avatar','background',c);
-    }
-    updateStats();
-}
-
-function displayName() {
-    return currentUser?.user_metadata?.full_name
-        || currentUser?.email?.split('@')[0]
-        || 'مستخدم';
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// POSTS (مع تشخيص أخطاء الإدراج)
-// ══════════════════════════════════════════════════════════════════════════════
-async function fetchPosts() {
-    const { data, error } = await db
-        .from('posts')
-        .select('id,author_id,author_name,title,content,upvotes,downvotes,created_at')
-        .order('created_at', { ascending: false })
-        .limit(80);
-
-    if (error) {
-        console.error('fetchPosts error:', error);
-        const c = document.getElementById('posts-container');
-        if (c) c.innerHTML = `<div class="card" style="padding:28px;text-align:center;color:#ef4444;font-size:.85rem">
-            ⚠️ فشل تحميل المنشورات: ${esc(error.message)}</div>`;
-        return;
-    }
-    allPostsCache = data || [];
-    renderTimeline();
-    updateStats();
-}
-
-async function fetchMyVotes() {
-    if (!currentUser) return;
-    const { data, error } = await db
-        .from('post_votes')
-        .select('post_id,vote_type')
-        .eq('user_id', currentUser.id);
-    if (error) console.error('fetchMyVotes error:', error);
-    myVotesCache = {};
-    (data||[]).forEach(v => { myVotesCache[v.post_id] = v.vote_type; });
-    renderTimeline();
-}
-
-async function createPost() {
-    if (!currentUser) {
-        toast('يجب تسجيل الدخول أولاً', 'error');
-        return openAuthModal();
-    }
-
-    const titleEl   = document.getElementById('post-title-input');
-    const contentEl = document.getElementById('post-textarea');
-    const title   = titleEl?.value?.trim() || '';
-    const content = contentEl?.value?.trim() || '';
-
-    if (!content) return toast('اكتب محتوى المنشور أولاً', 'error');
-
-    const btn = document.getElementById('post-submit-btn');
-    if (btn) { btn.disabled = true; btn.textContent = '...'; }
-
-    const newPost = {
-        title:        title || content.slice(0,60),
-        content,
-        author_id:    currentUser.id,
-        author_name:  displayName(),
-        upvotes:      0,
-        downvotes:    0,
-    };
-
-    console.log('Inserting post:', newPost);
-
-    const { data, error } = await db.from('posts').insert(newPost).select();
-
-    if (btn) { btn.disabled = false; btn.innerHTML = 'نشر <i class="fa-solid fa-paper-plane"></i>'; }
-
-    if (error) {
-        console.error('Insert error:', error);
-        toast('فشل النشر: ' + error.message, 'error');
-        return;
-    }
-
-    console.log('Post inserted successfully:', data);
-    if (titleEl) titleEl.value = '';
-    if (contentEl) contentEl.value = '';
-    toast('تم النشر! ✅', 'success');
-    await fetchPosts();
-}
-
-async function handleVote(postId, voteType) {
-    if (!currentUser) return openAuthModal();
-
-    const post = allPostsCache.find(p => p.id === postId);
-    if (!post) return;
-    const current = myVotesCache[postId];
-
-    if (current === voteType) {
-        // إلغاء التصويت
-        const { error: delErr } = await db.from('post_votes')
-            .delete().eq('post_id', postId).eq('user_id', currentUser.id);
-        if (delErr) return toast('فشل إلغاء التصويت: '+delErr.message, 'error');
-
-        const field = voteType === 'upvote' ? 'upvotes' : 'downvotes';
-        const newVal = Math.max(0, (post[field]||0) - 1);
-        await db.from('posts').update({ [field]: newVal }).eq('id', postId);
-        post[field] = newVal;
-        delete myVotesCache[postId];
-    } else {
-        if (current) {
-            // تغيير التصويت
-            await db.from('post_votes')
-                .update({ vote_type: voteType })
-                .eq('post_id', postId).eq('user_id', currentUser.id);
-            const oldField = current === 'upvote' ? 'upvotes' : 'downvotes';
-            const newField = voteType === 'upvote' ? 'upvotes' : 'downvotes';
-            post[oldField] = Math.max(0, (post[oldField]||0) - 1);
-            post[newField] = (post[newField]||0) + 1;
-            await db.from('posts').update({
-                [oldField]: post[oldField],
-                [newField]: post[newField],
-            }).eq('id', postId);
-        } else {
-            // تصويت جديد
-            const { error: insErr } = await db.from('post_votes')
-                .insert({ post_id: postId, user_id: currentUser.id, vote_type: voteType });
-            if (insErr) return toast('فشل التصويت: '+insErr.message, 'error');
-            const field = voteType === 'upvote' ? 'upvotes' : 'downvotes';
-            post[field] = (post[field]||0) + 1;
-            await db.from('posts').update({ [field]: post[field] }).eq('id', postId);
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pulse — منصة المجتمع الحي</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/livekit-client@1/dist/livekit-client.umd.js"></script>
+    <style>
+        :root {
+            --bg: #F7F4EF;
+            --card: #FFFFFF;
+            --accent: #FF4D00;
+            --accent2: #7C3AED;
+            --gold: #F59E0B;
+            --dark: #0F0F0F;
+            --muted: #9CA3AF;
+            --border: #EBEBEB;
+            --room-bg: #0D0D1A;
         }
-        myVotesCache[postId] = voteType;
-    }
+        * { box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            color: var(--dark);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+        }
 
-    renderTimeline();
-}
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; }
 
-async function deletePost(postId) {
-    if (!currentUser) return;
-    if (!confirm('حذف هذا المنشور؟')) return;
-    const { error } = await db.from('posts').delete()
-        .eq('id', postId).eq('author_id', currentUser.id);
-    if (error) return toast('فشل الحذف: '+error.message, 'error');
-    allPostsCache = allPostsCache.filter(p => p.id !== postId);
-    delete myVotesCache[postId];
-    renderTimeline();
-    toast('تم الحذف', 'info');
-}
+        /* ── Animations ── */
+        @keyframes fadeUp   { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes fadeIn   { from { opacity:0; } to { opacity:1; } }
+        @keyframes slideUp  { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
+        @keyframes roomIn   { from { opacity:0; transform:scale(.97); } to { opacity:1; transform:scale(1); } }
+        @keyframes blink    { 0%,100%{opacity:1} 50%{opacity:.25} }
+        @keyframes ripple   { 0%{box-shadow:0 0 0 0 rgba(255,77,0,.5)} 100%{box-shadow:0 0 0 16px rgba(255,77,0,0)} }
+        @keyframes speaking { 0%,100%{box-shadow:0 0 0 0 rgba(124,58,237,.7)} 60%{box-shadow:0 0 0 12px rgba(124,58,237,0)} }
+        @keyframes micGlow  { 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.6)} 60%{box-shadow:0 0 0 10px rgba(34,197,94,0)} }
+        @keyframes float    { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
 
-function switchTab(tab) {
-    currentTab = tab;
-    document.getElementById('tab-latest')?.classList.toggle('active', tab==='latest');
-    document.getElementById('tab-top')?.classList.toggle('active', tab==='top');
-    renderTimeline();
-}
+        .fade-up  { animation: fadeUp .3s ease both; }
+        .fade-in  { animation: fadeIn .25s ease both; }
 
-function getSorted() {
-    if (currentTab === 'top')
-        return [...allPostsCache].sort((a,b)=>
-            ((b.upvotes||0)-(b.downvotes||0)) - ((a.upvotes||0)-(a.downvotes||0)));
-    return [...allPostsCache];
-}
+        /* ── Nav ── */
+        .nav-item { 
+            display:flex; flex-direction:column; align-items:center; gap:3px;
+            padding:8px 14px; border-radius:14px; cursor:pointer;
+            font-size:.7rem; font-weight:700; color:var(--muted);
+            transition:all .2s; border:none; background:transparent;
+        }
+        .nav-item:hover { background:#f0ede8; color:var(--dark); }
+        .nav-item.active { color:var(--accent); background:#fff3f0; }
+        .nav-item i { font-size:1.15rem; }
 
-function renderTimeline() {
-    const c = document.getElementById('posts-container');
-    if (!c) return;
-    const posts = getSorted();
-    if (!posts.length) {
-        c.innerHTML = `<div class="card" style="padding:50px 20px;text-align:center">
-            <div style="font-size:2.5rem;margin-bottom:12px">📭</div>
-            <p style="color:var(--muted);font-size:.9rem">لا توجد منشورات بعد.<br>كن أول من يشارك!</p>
-        </div>`;
-        return;
-    }
-    scrollY = window.scrollY;
-    c.innerHTML = posts.map(postCard).join('');
-    window.scrollTo(0, scrollY);
-}
+        /* ── Cards ── */
+        .card {
+            background:var(--card);
+            border-radius:20px;
+            border:1px solid var(--border);
+            overflow:hidden;
+        }
+        .card-hover { transition:transform .2s, box-shadow .2s; cursor:pointer; }
+        .card-hover:hover { transform:translateY(-2px); box-shadow:0 8px 32px rgba(0,0,0,.08); }
 
-function postCard(post) {
-    const name    = post.author_name || 'مجهول';
-    const upv     = post.upvotes   || 0;
-    const downv   = post.downvotes || 0;
-    const net     = upv - downv;
-    const myVote  = myVotesCache[post.id];
-    const isOwner = currentUser && currentUser.id === post.author_id;
-    const content = esc(post.content)
-        .replace(/#(\S+)/g,'<span style="color:var(--accent2);cursor:pointer;font-weight:700" onclick="filterByTag(\'$1\')">#$1</span>');
+        /* ── Post Card ── */
+        .post-card { padding:20px; }
+        .post-card + .post-card { border-top:1px solid var(--border); }
+        .reaction-btn {
+            display:flex; align-items:center; gap:5px;
+            padding:5px 12px; border-radius:20px; border:1.5px solid var(--border);
+            font-size:.75rem; font-weight:700; cursor:pointer;
+            background:transparent; transition:all .15s; color:var(--muted);
+        }
+        .reaction-btn:hover { border-color:var(--accent); color:var(--accent); background:#fff3f0; }
+        .reaction-btn.liked { background:#fff3f0; border-color:var(--accent); color:var(--accent); }
+        .reaction-btn.disliked { background:#fef2f2; border-color:#ef4444; color:#ef4444; }
 
-    return `<div class="card fade-up" style="padding:0" data-id="${post.id}">
-        <div style="padding:18px 20px 14px">
-            <div style="display:flex;gap:12px">
-                <div class="avatar av-sm" style="background:${getColor(name)};margin-top:2px">${getInitial(name)}</div>
-                <div style="flex:1;min-width:0">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                            <span style="font-weight:800;font-size:.88rem;color:var(--dark)">${esc(name)}</span>
-                            <span style="font-size:.72rem;color:var(--muted)">${fmtDate(post.created_at)}</span>
-                        </div>
-                        ${isOwner ? `<button onclick="deletePost(${post.id})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;padding:4px 8px;border-radius:8px;transition:color .15s" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='var(--muted)'"><i class="fa-regular fa-trash-can"></i></button>` : ''}
-                    </div>
-                    ${post.title ? `<div style="font-weight:800;font-size:.92rem;color:var(--dark);margin-bottom:5px">${esc(post.title)}</div>` : ''}
-                    <p style="font-size:.87rem;line-height:1.7;color:#2a2a2a;white-space:pre-wrap;margin:0">${content}</p>
+        /* ── Avatar ── */
+        .avatar {
+            border-radius:50%; display:flex; align-items:center; justify-content:center;
+            font-weight:900; flex-shrink:0; color:#fff;
+        }
+        .av-sm  { width:36px; height:36px; font-size:.85rem; }
+        .av-md  { width:48px; height:48px; font-size:1rem; }
+        .av-lg  { width:64px; height:64px; font-size:1.3rem; }
+        .av-xl  { width:80px; height:80px; font-size:1.7rem; }
+        .av-2xl { width:96px; height:96px; font-size:2rem; }
+
+        /* ── Badge ── */
+        .badge {
+            display:inline-flex; align-items:center; gap:4px;
+            padding:3px 10px; border-radius:20px;
+            font-size:.66rem; font-weight:800;
+        }
+        .badge-live { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; }
+        .badge-host { background:#fef3c7; color:#92400e; }
+        .badge-new  { background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; }
+
+        /* ── Btn ── */
+        .btn {
+            display:inline-flex; align-items:center; justify-content:center; gap:7px;
+            padding:11px 22px; border-radius:14px; font-weight:800; font-size:.85rem;
+            cursor:pointer; border:none; transition:all .2s;
+        }
+        .btn-primary { background:var(--dark); color:#fff; }
+        .btn-primary:hover { background:#333; transform:translateY(-1px); box-shadow:0 4px 16px rgba(0,0,0,.25); }
+        .btn-accent  { background:var(--accent); color:#fff; box-shadow:0 4px 16px rgba(255,77,0,.35); }
+        .btn-accent:hover { background:#e04400; transform:translateY(-1px); }
+        .btn-ghost  { background:transparent; border:2px solid var(--border); color:var(--dark); }
+        .btn-ghost:hover { border-color:var(--dark); }
+        .btn-danger { background:#ef4444; color:#fff; box-shadow:0 4px 16px rgba(239,68,68,.35); }
+
+        /* ── Input ── */
+        .input-field {
+            width:100%; padding:12px 16px;
+            border:2px solid var(--border); border-radius:12px;
+            font-size:.9rem; background:#fafafa; outline:none;
+            font-family:inherit; transition:border-color .2s; color:var(--dark);
+        }
+        .input-field:focus { border-color:var(--accent); background:#fff; }
+
+        /* ══════════════════════════════════
+           ROOM STYLES — Clubhouse Premium
+        ══════════════════════════════════ */
+        .room-card {
+            background:#fff;
+            border-radius:24px;
+            padding:22px;
+            border:1px solid var(--border);
+            cursor:pointer;
+            transition:all .2s;
+            position:relative;
+            overflow:hidden;
+        }
+        .room-card::before {
+            content:'';
+            position:absolute; top:0; left:0; right:0; height:3px;
+            background:linear-gradient(90deg, var(--accent), var(--accent2));
+            opacity:0; transition:opacity .2s;
+        }
+        .room-card:hover { transform:translateY(-3px); box-shadow:0 12px 40px rgba(0,0,0,.1); }
+        .room-card:hover::before { opacity:1; }
+
+        /* Full-screen room panel */
+        #active-room-panel {
+            position:fixed; inset:0; z-index:200;
+            background:linear-gradient(160deg, #0D0D1A 0%, #111827 50%, #1a0a2e 100%);
+            color:#fff; overflow-y:auto;
+            animation:roomIn .4s cubic-bezier(.34,1.1,.64,1);
+        }
+        .room-inner { max-width:560px; margin:0 auto; padding:24px 20px 140px; }
+
+        .speaker-bubble {
+            display:flex; flex-direction:column; align-items:center; gap:8px;
+            cursor:pointer; transition:transform .2s;
+        }
+        .speaker-bubble:hover { transform:scale(1.05); }
+        .speaker-avatar {
+            position:relative; border-radius:50%;
+            display:flex; align-items:center; justify-content:center;
+            font-weight:900; color:#fff; font-size:1.6rem;
+            width:78px; height:78px;
+            border:3px solid rgba(255,255,255,.1);
+            transition:border-color .3s;
+        }
+        .speaker-avatar.speaking { animation:speaking 1.6s infinite; border-color:#7C3AED; }
+        .speaker-mic {
+            position:absolute; bottom:1px; right:1px;
+            width:22px; height:22px; border-radius:50%;
+            display:flex; align-items:center; justify-content:center;
+            font-size:9px; border:2px solid #0D0D1A;
+        }
+        .speaker-mic.on  { background:#22c55e; animation:micGlow 1.2s infinite; }
+        .speaker-mic.off { background:#4b5563; }
+
+        .listener-bubble {
+            width:46px; height:46px; border-radius:50%;
+            display:flex; align-items:center; justify-content:center;
+            font-size:.95rem; font-weight:800; color:#fff;
+            opacity:.8; border:2px solid rgba(255,255,255,.08);
+            cursor:pointer; transition:opacity .2s, transform .2s;
+        }
+        .listener-bubble:hover { opacity:1; transform:scale(1.1); }
+
+        /* Bottom control bar */
+        .room-controls {
+            position:fixed; bottom:0; left:0; right:0;
+            background:rgba(10,10,20,.95);
+            backdrop-filter:blur(20px);
+            border-top:1px solid rgba(255,255,255,.07);
+            padding:14px 20px 32px;
+        }
+        .room-controls-inner {
+            max-width:560px; margin:0 auto;
+            display:flex; align-items:center; justify-content:center; gap:20px;
+        }
+        .ctrl-btn {
+            border:none; cursor:pointer;
+            border-radius:50%; display:flex; align-items:center; justify-content:center;
+            transition:all .2s; flex-shrink:0;
+        }
+        .ctrl-mic {
+            width:62px; height:62px; font-size:1.25rem;
+            background:rgba(255,255,255,.1); color:#fff;
+        }
+        .ctrl-mic.active { background:rgba(34,197,94,.2); color:#4ade80; animation:micGlow 1.2s infinite; }
+        .ctrl-hand {
+            width:50px; height:50px; font-size:1.1rem;
+            background:rgba(255,255,255,.07); color:rgba(255,255,255,.6);
+        }
+        .ctrl-hand.raised { background:rgba(245,158,11,.2); color:#fbbf24; }
+        .ctrl-leave {
+            padding:14px 22px; border-radius:30px;
+            background:#ef4444; color:#fff;
+            font-weight:800; font-size:.85rem;
+            box-shadow:0 4px 20px rgba(239,68,68,.4);
+            border:none; cursor:pointer;
+            display:flex; align-items:center; gap:8px;
+            transition:all .2s;
+        }
+        .ctrl-leave:hover { background:#dc2626; transform:scale(1.03); }
+
+        /* ── Story ring (explore section) ── */
+        .story-ring {
+            width:64px; height:64px; border-radius:50%;
+            background:linear-gradient(135deg, var(--accent), var(--accent2));
+            padding:2.5px; flex-shrink:0; cursor:pointer;
+        }
+        .story-ring-inner {
+            width:100%; height:100%; border-radius:50%;
+            border:2.5px solid var(--bg);
+            display:flex; align-items:center; justify-content:center;
+            font-size:1.1rem; font-weight:900; color:#fff;
+        }
+
+        /* ── Trending tag ── */
+        .trend-tag {
+            display:inline-flex; align-items:center; gap:5px;
+            padding:6px 14px; border-radius:20px;
+            background:#f4f1ee; font-size:.78rem; font-weight:700;
+            cursor:pointer; transition:all .15s; border:none; color:var(--dark);
+        }
+        .trend-tag:hover { background:var(--dark); color:#fff; }
+
+        /* ── Tab ── */
+        .tab-btn {
+            padding:8px 18px; border-radius:20px; font-size:.8rem; font-weight:700;
+            cursor:pointer; border:none; transition:all .15s; color:var(--muted); background:transparent;
+        }
+        .tab-btn.active { background:var(--dark); color:#fff; }
+
+        /* ── Modal ── */
+        .modal-overlay {
+            position:fixed; inset:0;
+            background:rgba(0,0,0,.6); backdrop-filter:blur(8px);
+            z-index:300; display:flex; align-items:flex-end; justify-content:center;
+        }
+        .modal-sheet {
+            background:#fff; border-radius:28px 28px 0 0;
+            padding:28px 24px 44px; width:100%; max-width:520px;
+            animation:slideUp .35s cubic-bezier(.34,1.1,.64,1);
+        }
+        .modal-handle {
+            width:40px; height:4px; background:#e5e7eb;
+            border-radius:4px; margin:0 auto 22px;
+        }
+
+        /* ── Misc ── */
+        .divider { height:1px; background:var(--border); margin:16px 0; }
+        .section-label { font-size:.68rem; font-weight:800; color:var(--muted); letter-spacing:1.2px; text-transform:uppercase; margin-bottom:14px; }
+        .hidden { display:none !important; }
+        .pill { padding:4px 12px; border-radius:20px; font-size:.72rem; font-weight:700; }
+
+        /* Responsive */
+        @media(min-width:768px){
+            .layout { display:grid; grid-template-columns:280px 1fr; gap:24px; max-width:960px; margin:0 auto; padding:24px 16px; }
+            .mobile-nav { display:none; }
+            .desktop-sidebar { display:block; }
+        }
+        @media(max-width:767px){
+            .layout { padding:16px 12px 90px; }
+            .desktop-sidebar { display:none; }
+            .mobile-nav { display:flex; }
+        }
+
+        /* ── Composer ── */
+        #post-textarea {
+            width:100%; padding:14px; min-height:90px; resize:none;
+            border:none; outline:none; font-size:.9rem; line-height:1.6;
+            font-family:inherit; background:transparent; color:var(--dark);
+        }
+        #post-textarea::placeholder { color:var(--muted); }
+
+        /* ── Explore Stories scroll ── */
+        .stories-scroll { display:flex; gap:14px; overflow-x:auto; padding-bottom:4px; }
+        .stories-scroll::-webkit-scrollbar { display:none; }
+    </style>
+</head>
+<body>
+
+<!-- ══════ TOAST ══════ -->
+<div id="status-msg" class="hidden" style="position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:999;background:#0f0f0f;color:#fff;padding:10px 22px;border-radius:30px;font-size:.82rem;font-weight:700;box-shadow:0 8px 30px rgba(0,0,0,.25);white-space:nowrap;max-width:90vw;text-align:center"></div>
+
+<!-- ══════ AUTH MODAL ══════ -->
+<div id="auth-modal" class="hidden modal-overlay" onclick="outsideCloseAuth(event)">
+    <div class="modal-sheet" style="max-width:440px">
+        <div class="modal-handle"></div>
+        <div style="text-align:center;margin-bottom:24px">
+            <div style="font-size:2rem;margin-bottom:8px">⚡</div>
+            <h2 id="auth-modal-title" style="font-size:1.35rem;font-weight:900;color:var(--dark)">تسجيل الدخول</h2>
+            <p style="font-size:.82rem;color:var(--muted);margin-top:4px">مرحباً بك في Pulse</p>
+        </div>
+
+        <!-- Login -->
+        <div id="login-form" class="space-y-3">
+            <input type="email" id="login-email" class="input-field" placeholder="البريد الإلكتروني">
+            <input type="password" id="login-password" class="input-field" placeholder="كلمة المرور"
+                onkeydown="if(event.key==='Enter') handleLogin()">
+            <button onclick="handleLogin()" class="btn btn-primary" style="width:100%;justify-content:center;padding:14px">
+                دخول <i class="fa-solid fa-arrow-left"></i>
+            </button>
+            <p style="text-align:center;font-size:.8rem;color:var(--muted);margin-top:10px">
+                مش عندك حساب؟
+                <span onclick="switchToSignup()" style="color:var(--accent);font-weight:800;cursor:pointer"> سجّل الآن</span>
+            </p>
+        </div>
+
+        <!-- Signup -->
+        <div id="signup-form" class="hidden space-y-3">
+            <input type="text"     id="signup-name"     class="input-field" placeholder="الاسم الكامل">
+            <input type="email"    id="signup-email"    class="input-field" placeholder="البريد الإلكتروني">
+            <input type="password" id="signup-password" class="input-field" placeholder="كلمة المرور (6+ أحرف)"
+                onkeydown="if(event.key==='Enter') handleSignup()">
+            <button onclick="handleSignup()" class="btn btn-accent" style="width:100%;justify-content:center;padding:14px">
+                إنشاء الحساب ✨
+            </button>
+            <p style="text-align:center;font-size:.8rem;color:var(--muted);margin-top:10px">
+                عندك حساب؟
+                <span onclick="switchToLogin()" style="color:var(--accent);font-weight:800;cursor:pointer"> سجّل دخول</span>
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- ══════ CREATE ROOM MODAL ══════ -->
+<div id="create-room-modal" class="hidden modal-overlay" onclick="outsideCloseRoom(event)">
+    <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <h3 style="font-size:1.15rem;font-weight:900;color:var(--dark);margin-bottom:6px;text-align:center">أطلق مجلساً 🎙️</h3>
+        <p style="font-size:.8rem;color:var(--muted);text-align:center;margin-bottom:20px">ابدأ نقاشاً مباشراً مع المجتمع</p>
+        <input type="text" id="room-title-input" class="input-field"
+            placeholder="عنوان المجلس... (مثال: نقاش عن الذكاء الاصطناعي)"
+            onkeydown="if(event.key==='Enter') createNewAudioRoom()">
+        <div style="display:flex;gap:10px;margin-top:14px">
+            <button onclick="hideCreateRoomModal()" class="btn btn-ghost" style="flex:1;justify-content:center">إلغاء</button>
+            <button onclick="createNewAudioRoom()" class="btn btn-accent" style="flex:2;justify-content:center">ابدأ الآن 🚀</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══════ ACTIVE ROOM PANEL ══════ -->
+<div id="active-room-panel" class="hidden">
+    <div class="room-inner">
+
+        <!-- Top bar -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+            <button onclick="leaveCurrentAudioRoom()"
+                style="background:rgba(255,255,255,.08);border:none;color:#fff;padding:8px 16px;border-radius:30px;font-size:.78rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px">
+                <i class="fa-solid fa-chevron-down"></i> مغادرة بهدوء
+            </button>
+            <span class="badge badge-live" style="font-size:.68rem">
+                <span style="width:6px;height:6px;background:#ef4444;border-radius:50%;animation:blink 1.2s infinite;display:inline-block"></span>
+                مباشر
+            </span>
+            <button id="close-active-room-btn" onclick="closeCurrentRoom()"
+                style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#f87171;padding:8px 14px;border-radius:30px;font-size:.78rem;font-weight:700;cursor:pointer">
+                <i class="fa-solid fa-door-closed"></i> إغلاق
+            </button>
+        </div>
+
+        <!-- Room title -->
+        <div style="text-align:center;margin:30px 0 36px">
+            <div id="active-room-title" style="font-size:1.5rem;font-weight:900;color:#fff;line-height:1.3">—</div>
+            <div id="active-room-role" style="margin-top:8px;font-size:.78rem;color:rgba(255,255,255,.45)">دورك: مستمع</div>
+        </div>
+
+        <!-- Speakers -->
+        <div class="section-label" style="color:rgba(255,255,255,.35)">المتحدثون على المسرح</div>
+        <div id="speakers-grid" style="display:flex;flex-wrap:wrap;gap:18px;justify-content:center;margin-bottom:32px"></div>
+
+        <div class="divider" style="background:rgba(255,255,255,.07)"></div>
+
+        <!-- Listeners -->
+        <div class="section-label" style="color:rgba(255,255,255,.35);margin-top:20px">في الجمهور</div>
+        <div id="listeners-grid" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+
+        <!-- hidden compat -->
+        <div id="room-participants-list" class="hidden"></div>
+    </div>
+
+    <!-- Controls -->
+    <div class="room-controls">
+        <div class="room-controls-inner">
+            <button id="mute-btn" onclick="toggleMic()" class="ctrl-btn ctrl-mic" data-muted="true">
+                <i class="fa-solid fa-microphone-slash"></i>
+            </button>
+            <button id="raise-hand-btn" onclick="raiseHand()" class="ctrl-btn ctrl-hand">✋</button>
+            <button onclick="leaveCurrentAudioRoom()" class="ctrl-leave">
+                <i class="fa-solid fa-phone-slash"></i> مغادرة
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ══════ MAIN LAYOUT ══════ -->
+<div class="layout">
+
+    <!-- ═══ DESKTOP SIDEBAR ═══ -->
+    <aside class="desktop-sidebar">
+
+        <!-- Logo -->
+        <div style="padding:8px 4px 24px">
+            <div style="display:flex;align-items:center;gap:10px">
+                <div style="width:38px;height:38px;background:var(--dark);border-radius:12px;display:flex;align-items:center;justify-content:center">
+                    <span style="color:#fff;font-size:1.1rem;font-weight:900">P</span>
+                </div>
+                <span style="font-size:1.3rem;font-weight:900;color:var(--dark)">Pulse</span>
+            </div>
+        </div>
+
+        <!-- Nav -->
+        <nav style="display:flex;flex-direction:column;gap:4px;margin-bottom:24px">
+            <button class="nav-item active" id="nav-timeline" onclick="navigateTo('timeline')" style="flex-direction:row;justify-content:flex-start;gap:12px;padding:12px 16px;border-radius:14px;font-size:.9rem">
+                <i class="fa-solid fa-house"></i> الرئيسية
+            </button>
+            <button class="nav-item" id="nav-rooms" onclick="navigateTo('rooms')" style="flex-direction:row;justify-content:flex-start;gap:12px;padding:12px 16px;border-radius:14px;font-size:.9rem">
+                <i class="fa-solid fa-tower-broadcast"></i> المجالس الصوتية
+            </button>
+            <button class="nav-item" id="nav-explore" onclick="navigateTo('explore')" style="flex-direction:row;justify-content:flex-start;gap:12px;padding:12px 16px;border-radius:14px;font-size:.9rem">
+                <i class="fa-solid fa-compass"></i> اكتشف
+            </button>
+            <button class="nav-item" id="nav-profile" onclick="navigateTo('profile')" style="flex-direction:row;justify-content:flex-start;gap:12px;padding:12px 16px;border-radius:14px;font-size:.9rem">
+                <i class="fa-solid fa-user"></i> حسابي
+            </button>
+        </nav>
+
+        <!-- Auth card -->
+        <div id="auth-toggle-btn">
+            <button onclick="openAuthModal()" class="btn btn-primary" style="width:100%;justify-content:center">
+                <i class="fa-solid fa-bolt"></i> دخول / تسجيل
+            </button>
+        </div>
+
+        <div id="user-profile-card" class="hidden card" style="padding:16px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+                <div class="avatar av-md" id="user-avatar-letter" style="background:var(--dark)">م</div>
+                <div style="min-width:0">
+                    <div id="user-display-name" style="font-weight:800;font-size:.9rem;color:var(--dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">...</div>
+                    <div id="user-email-display" style="font-size:.72rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+                </div>
+            </div>
+            <button onclick="handleLogout()" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:.8rem;padding:9px">
+                <i class="fa-solid fa-right-from-bracket"></i> خروج
+            </button>
+        </div>
+
+        <!-- Stats -->
+        <div class="card" style="padding:16px;margin-top:16px">
+            <div style="font-size:.68rem;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">إحصائيات المنصة</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <span style="font-size:.8rem;color:var(--muted)"><i class="fa-solid fa-file-lines fa-fw" style="margin-left:6px"></i>منشورات</span>
+                    <span id="stat-posts" style="font-weight:900;font-size:.9rem">—</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <span style="font-size:.8rem;color:var(--muted)"><i class="fa-solid fa-tower-broadcast fa-fw" style="margin-left:6px;color:var(--accent)"></i>مجالس حية</span>
+                    <span id="stat-rooms" style="font-weight:900;font-size:.9rem;color:var(--accent)">—</span>
                 </div>
             </div>
         </div>
-        <div style="padding:10px 20px 14px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px">
-            <button class="reaction-btn ${myVote==='upvote'?'liked':''}" onclick="handleVote(${post.id},'upvote')">
-                <i class="fa-solid fa-arrow-up"></i> ${fmtNum(upv)}
-            </button>
-            <button class="reaction-btn ${myVote==='downvote'?'disliked':''}" onclick="handleVote(${post.id},'downvote')">
-                <i class="fa-solid fa-arrow-down"></i> ${fmtNum(downv)}
-            </button>
-            <span style="font-size:.75rem;color:var(--muted);font-weight:700;margin-right:auto">${net>=0?'+':''}${net}</span>
-        </div>
-    </div>`;
-}
 
-function filterByTag(tag) {
-    navigateTo('timeline');
-    currentTab = 'latest';
-    const filtered = allPostsCache.filter(p =>
-        p.content?.includes('#'+tag) || p.title?.includes('#'+tag));
-    const c = document.getElementById('posts-container');
-    if (!c) return;
-    if (!filtered.length) {
-        c.innerHTML = `<div class="card" style="padding:32px;text-align:center;color:var(--muted)">
-            لا توجد منشورات بوسم #${esc(tag)}</div>`;
-        return;
-    }
-    c.innerHTML = filtered.map(postCard).join('');
-}
+    </aside>
 
-// ══════════════════════════════════════════════════════════════════════════════
-// EXPLORE, PROFILE, STATS (نفس السابق مع تحسينات بسيطة)
-// ══════════════════════════════════════════════════════════════════════════════
-function renderExplorePage() {
-    const el = document.getElementById('explore-posts');
-    if (!el) return;
-    const top = [...allPostsCache]
-        .sort((a,b)=>((b.upvotes||0)-(b.downvotes||0))-((a.upvotes||0)-(a.downvotes||0)))
-        .slice(0,10);
-    el.innerHTML = top.length ? top.map(postCard).join('') :
-        '<p style="color:var(--muted);font-size:.85rem;text-align:center;padding:20px">لا توجد منشورات بعد.</p>';
-}
+    <!-- ═══ MAIN CONTENT ═══ -->
+    <main>
 
-function renderProfilePage() {
-    if (!currentUser) return;
-    const name    = displayName();
-    const initial = getInitial(name);
-    const color   = getColor(name);
+        <!-- ─── TIMELINE VIEW ─── -->
+        <section id="timeline-view" class="fade-in" style="display:flex;flex-direction:column;gap:16px">
 
-    const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
-    const css = (id,p,v)=>{ const el=document.getElementById(id); if(el) el.style[p]=v; };
-
-    set('profile-display-name', name);
-    set('profile-username', currentUser.email||'');
-    set('profile-avatar', initial);
-    css('profile-avatar','background',color);
-
-    const myPosts = allPostsCache.filter(p => p.author_id === currentUser.id);
-    const myVotes = myPosts.reduce((s,p)=>s+(p.upvotes||0),0);
-    set('profile-posts-count', myPosts.length);
-    set('profile-votes-count', fmtNum(myVotes));
-    set('profile-rooms-count','—');
-
-    const listEl = document.getElementById('profile-posts-list');
-    if (!listEl) return;
-    listEl.innerHTML = myPosts.length
-        ? myPosts.map(p=>`<div class="card" style="padding:16px">
-            ${p.title?`<div style="font-weight:800;font-size:.88rem;margin-bottom:5px;color:var(--dark)">${esc(p.title)}</div>`:''}
-            <p style="font-size:.85rem;line-height:1.65;color:#2a2a2a;margin:0 0 10px;white-space:pre-wrap">${esc(p.content)}</p>
-            <div style="display:flex;justify-content:space-between;align-items:center">
-                <span style="font-size:.72rem;color:var(--muted)">${fmtDate(p.created_at)}</span>
-                <div style="display:flex;gap:10px;align-items:center">
-                    <span style="font-size:.75rem;color:var(--muted);font-weight:700">
-                        <i class="fa-solid fa-arrow-up" style="color:#22c55e"></i> ${p.upvotes||0}
-                    </span>
-                    <button onclick="deletePost(${p.id})" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:.8rem">
-                        <i class="fa-regular fa-trash-can"></i>
+            <!-- Composer logged in -->
+            <div id="composer-logged-in" class="hidden card" style="padding:0">
+                <div style="display:flex;gap:12px;padding:18px 18px 0">
+                    <div class="avatar av-sm" id="composer-avatar" style="background:var(--dark);margin-top:4px">م</div>
+                    <textarea id="post-textarea" placeholder="شاركنا ما يدور في ذهنك..."></textarea>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 18px 14px;border-top:1px solid var(--border);margin-top:10px">
+                    <div style="display:flex;gap:8px">
+                        <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.85rem" title="صورة"><i class="fa-regular fa-image"></i></button>
+                        <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.85rem" title="رابط"><i class="fa-solid fa-link"></i></button>
+                        <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.85rem" title="وسم"><i class="fa-solid fa-hashtag"></i></button>
+                    </div>
+                    <button id="post-submit-btn" onclick="createPost()" class="btn btn-primary" style="padding:8px 18px;font-size:.82rem">
+                        نشر <i class="fa-solid fa-paper-plane"></i>
                     </button>
                 </div>
             </div>
-        </div>`).join('')
-        : '<p style="text-align:center;color:var(--muted);padding:24px 0;font-size:.88rem">لم تنشر شيئاً بعد 📝</p>';
-}
 
-async function updateStats() {
-    const postsEl = document.getElementById('stat-posts');
-    const roomsEl = document.getElementById('stat-rooms');
-    if (postsEl) postsEl.textContent = fmtNum(allPostsCache.length);
-    if (roomsEl) {
-        const { count, error } = await db.from('audio_rooms')
-            .select('id', { count:'exact', head:true })
-            .eq('is_active', true);
-        if (error) console.error('updateStats rooms error:', error);
-        roomsEl.textContent = fmtNum(count||0);
-    }
-}
+            <!-- Composer logged out -->
+            <div id="composer-logged-out" class="card" style="padding:20px;text-align:center">
+                <div style="font-size:1.6rem;margin-bottom:8px">👋</div>
+                <p style="font-size:.88rem;font-weight:600;color:var(--dark);margin-bottom:12px">انضم لمجتمع Pulse وشارك أفكارك</p>
+                <button onclick="openAuthModal()" class="btn btn-accent" style="padding:10px 24px">
+                    ابدأ الآن — مجاناً ✨
+                </button>
+            </div>
 
-// ══════════════════════════════════════════════════════════════════════════════
-// AUDIO ROOMS (مع تشخيص)
-// ══════════════════════════════════════════════════════════════════════════════
-async function fetchRooms() {
-    const { data, error } = await db
-        .from('audio_rooms')
-        .select('id,title,host_name,host_id,is_active,created_at')
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
-    if (error) { console.error('fetchRooms error:', error); return; }
-    renderRooms(data||[]);
-    updateStats();
-}
+            <!-- Feed tabs -->
+            <div style="display:flex;gap:6px;padding:4px 0">
+                <button class="tab-btn active" id="tab-latest" onclick="switchTab('latest')">🔥 الأحدث</button>
+                <button class="tab-btn" id="tab-top" onclick="switchTab('top')">⬆️ الأعلى تقييماً</button>
+            </div>
 
-function renderRooms(rooms) {
-    const grid  = document.getElementById('rooms-grid');
-    const empty = document.getElementById('rooms-empty-state');
-    if (!grid) return;
-    if (!rooms.length) {
-        grid.innerHTML = '';
-        empty?.classList.remove('hidden');
-        return;
-    }
-    empty?.classList.add('hidden');
-    grid.innerHTML = rooms.map(room => {
-        const hostName = room.host_name || 'المضيف';
-        return `<div class="room-card card-hover" onclick="joinRoom('${room.id}','${esc(room.title).replace(/'/g,"\\'")}','${room.host_id}')">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px">
-                <div style="flex:1;min-width:0">
-                    <h3 style="font-size:1rem;font-weight:800;color:var(--dark);margin:0 0 8px;line-height:1.4">${esc(room.title)}</h3>
-                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                        <div class="avatar av-sm" style="background:${getColor(hostName)}">${getInitial(hostName)}</div>
-                        <span class="badge badge-host">🎤 ${esc(hostName)}</span>
-                        <span style="font-size:.7rem;color:var(--muted)">${fmtDate(room.created_at)}</span>
+            <!-- Posts -->
+            <div id="posts-container" style="display:flex;flex-direction:column;gap:12px"></div>
+        </section>
+
+        <!-- ─── ROOMS VIEW ─── -->
+        <section id="rooms-view" class="hidden fade-in" style="display:flex;flex-direction:column;gap:16px">
+
+            <!-- Header -->
+            <div class="card" style="padding:20px 22px">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+                    <div>
+                        <h2 style="font-size:1.15rem;font-weight:900;color:var(--dark);margin:0;display:flex;align-items:center;gap:8px">
+                            🎙️ المجالس الصوتية
+                        </h2>
+                        <p style="font-size:.75rem;color:var(--muted);margin:4px 0 0">نقاشات مباشرة — انضم أو ابدأ الآن</p>
+                    </div>
+                    <button onclick="showCreateRoomModal()" class="btn btn-accent" style="padding:10px 18px;font-size:.82rem">
+                        <i class="fa-solid fa-plus"></i> إطلاق مجلس
+                    </button>
+                </div>
+            </div>
+
+            <!-- Rooms grid -->
+            <div id="rooms-grid" style="display:flex;flex-direction:column;gap:14px"></div>
+
+            <!-- Empty state -->
+            <div id="rooms-empty-state" class="hidden" style="text-align:center;padding:60px 20px">
+                <div style="font-size:3.5rem;margin-bottom:16px;animation:float 3s ease-in-out infinite">🎙️</div>
+                <h3 style="font-size:1.05rem;font-weight:800;color:var(--dark);margin:0 0 8px">لا توجد مجالس نشطة</h3>
+                <p style="font-size:.85rem;color:var(--muted);margin:0 0 20px">كن أول من يطلق نقاشاً اليوم!</p>
+                <button onclick="showCreateRoomModal()" class="btn btn-accent">ابدأ مجلساً جديداً 🚀</button>
+            </div>
+        </section>
+
+        <!-- ─── EXPLORE VIEW ─── -->
+        <section id="explore-view" class="hidden fade-in" style="display:flex;flex-direction:column;gap:16px">
+            <div class="card" style="padding:20px">
+                <h2 style="font-size:1.1rem;font-weight:900;margin:0 0 16px">🔍 اكتشف المجتمع</h2>
+
+                <!-- Trending tags -->
+                <div class="section-label">الأكثر تداولاً</div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px" id="trending-tags">
+                    <button class="trend-tag" onclick="filterByTag('تقنية')">#تقنية</button>
+                    <button class="trend-tag" onclick="filterByTag('ذكاء_اصطناعي')">#ذكاء_اصطناعي</button>
+                    <button class="trend-tag" onclick="filterByTag('ريادة')">#ريادة</button>
+                    <button class="trend-tag" onclick="filterByTag('برمجة')">#برمجة</button>
+                    <button class="trend-tag" onclick="filterByTag('إبداع')">#إبداع</button>
+                    <button class="trend-tag" onclick="filterByTag('ثقافة')">#ثقافة</button>
+                </div>
+
+                <!-- Top posts preview -->
+                <div class="section-label">أبرز المنشورات</div>
+                <div id="explore-posts" style="display:flex;flex-direction:column;gap:12px"></div>
+            </div>
+        </section>
+
+        <!-- ─── PROFILE VIEW ─── -->
+        <section id="profile-view" class="hidden fade-in" style="display:flex;flex-direction:column;gap:16px">
+            <div class="card" style="padding:28px 24px">
+                <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
+                    <div class="avatar av-xl" id="profile-avatar" style="background:var(--dark)">م</div>
+                    <div>
+                        <h2 id="profile-display-name" style="font-size:1.25rem;font-weight:900;margin:0 0 3px">—</h2>
+                        <p id="profile-username" style="font-size:.8rem;color:var(--muted);margin:0"></p>
+                        <span class="badge badge-new" style="margin-top:8px;display:inline-flex">✦ عضو Pulse</span>
                     </div>
                 </div>
-                <span class="badge badge-live">
-                    <span style="width:6px;height:6px;background:#ef4444;border-radius:50%;animation:blink 1.2s infinite;display:inline-block"></span>
-                    مباشر
-                </span>
-            </div>
-            <div class="divider" style="margin:12px 0"></div>
-            <div style="display:flex;align-items:center;justify-content:space-between">
-                <span style="font-size:.78rem;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px">
-                    <i class="fa-solid fa-headphones" style="color:var(--accent)"></i> انقر للانضمام
-                </span>
-                <div style="background:var(--accent);color:#fff;padding:7px 16px;border-radius:20px;font-size:.75rem;font-weight:800;display:flex;align-items:center;gap:6px">
-                    <i class="fa-solid fa-microphone"></i> دخول
+
+                <!-- Stats row -->
+                <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:14px;overflow:hidden">
+                    <div style="flex:1;padding:14px;text-align:center;border-left:1px solid var(--border)">
+                        <div id="profile-posts-count" style="font-size:1.4rem;font-weight:900">0</div>
+                        <div style="font-size:.7rem;color:var(--muted);font-weight:600">منشور</div>
+                    </div>
+                    <div style="flex:1;padding:14px;text-align:center;border-left:1px solid var(--border)">
+                        <div id="profile-votes-count" style="font-size:1.4rem;font-weight:900">0</div>
+                        <div style="font-size:.7rem;color:var(--muted);font-weight:600">إعجاب</div>
+                    </div>
+                    <div style="flex:1;padding:14px;text-align:center">
+                        <div id="profile-rooms-count" style="font-size:1.4rem;font-weight:900">0</div>
+                        <div style="font-size:.7rem;color:var(--muted);font-weight:600">مجلس</div>
+                    </div>
                 </div>
+
+                <button onclick="handleLogout()" class="btn btn-ghost" style="margin-top:16px;width:100%;justify-content:center;color:#ef4444;border-color:#fecaca">
+                    <i class="fa-solid fa-right-from-bracket"></i> تسجيل الخروج
+                </button>
             </div>
-        </div>`;
-    }).join('');
-}
 
-function showCreateRoomModal() {
-    if (!currentUser) { openAuthModal(); return; }
-    document.getElementById('create-room-modal').classList.remove('hidden');
-    setTimeout(()=>document.getElementById('room-title-input')?.focus(),300);
-}
-function hideCreateRoomModal() {
-    document.getElementById('create-room-modal').classList.add('hidden');
-}
-function outsideCloseRoom(e) {
-    if (e.target.id==='create-room-modal') hideCreateRoomModal();
-}
-
-async function createNewAudioRoom() {
-    if (!currentUser) { openAuthModal(); return; }
-    const input = document.getElementById('room-title-input');
-    const title = input?.value?.trim();
-    if (!title) return toast('أدخل عنوان المجلس','error');
-
-    const btn = document.querySelector('#create-room-modal .btn-accent');
-    if (btn) { btn.textContent='...'; btn.disabled=true; }
-
-    const name = displayName();
-
-    const { data, error } = await db.from('audio_rooms').insert({
-        title,
-        host_id:   currentUser.id,
-        host_name: name,
-        is_active: true,
-    }).select('id,title,host_id').single();
-
-    if (btn) { btn.innerHTML='ابدأ الآن 🚀'; btn.disabled=false; }
-    if (error) {
-        console.error('Create room error:', error);
-        return toast('فشل إنشاء الغرفة: '+error.message,'error');
-    }
-
-    if (input) input.value='';
-    hideCreateRoomModal();
-    toast('تم إطلاق المجلس! 🚀','success');
-    await fetchRooms();
-    if (data) joinRoom(data.id, data.title, data.host_id);
-}
-
-async function joinRoom(roomId, title, hostId) {
-    if (!currentUser) return openAuthModal();
-    if (currentRoom) await leaveCurrentAudioRoom(true);
-
-    const userName = displayName();
-    const roomName = `room_${roomId}`;
-
-    try {
-        const res = await fetch('/api/livekit-token', {
-            method:  'POST',
-            headers: { 'Content-Type':'application/json' },
-            body:    JSON.stringify({ roomName, participantName: userName }),
-        });
-        if (!res.ok) {
-            const text = await res.text();
-            console.error('Token fetch failed:', res.status, text);
-            throw new Error(`HTTP ${res.status}: ${text}`);
-        }
-        const { token, wsUrl } = await res.json();
-        if (!token || !wsUrl) throw new Error('Invalid token response');
-
-        const room = new LivekitClient.Room({ adaptiveStream:true, dynacast:true });
-
-        room.on(LivekitClient.RoomEvent.TrackSubscribed, track => {
-            if (track.kind === LivekitClient.Track.Kind.Audio) {
-                track.attach().play().catch(e=>console.warn('Audio play error:', e));
-            }
-        });
-
-        const onRoomChange = () => refreshRoomUI(room);
-        room.on(LivekitClient.RoomEvent.ParticipantConnected,    onRoomChange);
-        room.on(LivekitClient.RoomEvent.ParticipantDisconnected, onRoomChange);
-        room.on(LivekitClient.RoomEvent.TrackMuted,              onRoomChange);
-        room.on(LivekitClient.RoomEvent.TrackUnmuted,            onRoomChange);
-
-        await room.connect(wsUrl, token);
-        await room.localParticipant.setMicrophoneEnabled(false).catch(()=>{});
-
-        currentRoom       = room;
-        currentRoomId     = roomId;
-        currentRoomHostId = hostId;
-        isCurrentUserHost = currentUser.id === hostId;
-
-        document.getElementById('active-room-panel').classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
-        document.getElementById('active-room-title').textContent = title;
-        document.getElementById('active-room-role').textContent  =
-            isCurrentUserHost ? 'أنت المضيف 👑' : 'مستمع في الجمهور';
-
-        const closeBtn = document.getElementById('close-active-room-btn');
-        if (closeBtn) closeBtn.style.display = isCurrentUserHost ? 'inline-flex' : 'none';
-
-        updateMicBtn();
-        refreshRoomUI(room);
-        window.addEventListener('beforeunload', quietLeave);
-        toast(`دخلت "${title}" 🎙️`,'success');
-
-    } catch(err) {
-        console.error('joinRoom error:', err);
-        toast('تعذر الانضمام: '+err.message,'error');
-    }
-}
-
-function refreshRoomUI(room) {
-    const sg = document.getElementById('speakers-grid');
-    const lg = document.getElementById('listeners-grid');
-    if (!sg||!lg) return;
-
-    const local   = room.localParticipant;
-    const remotes = Array.from(room.remoteParticipants?.values() || []);
-    const all = [
-        { identity: local.identity, isMicOn: local.isMicrophoneEnabled, isLocal: true },
-        ...remotes.map(p=>({ identity: p.identity, isMicOn: p.isMicrophoneEnabled, isLocal: false })),
-    ];
-
-    const stage    = all.slice(0, Math.min(8, all.length));
-    const audience = all.slice(Math.min(8, all.length));
-
-    sg.innerHTML = stage.map(p => {
-        const c    = getColor(p.identity);
-        const init = getInitial(p.identity);
-        const spk  = p.isMicOn ? 'speaking' : '';
-        return `<div class="speaker-bubble">
-            <div class="speaker-avatar ${spk}" style="background:${c}">
-                ${init}
-                <span class="speaker-mic ${p.isMicOn?'on':'off'}">
-                    <i class="fa-solid ${p.isMicOn?'fa-microphone':'fa-microphone-slash'}" style="color:#fff;font-size:8px"></i>
-                </span>
+            <!-- My posts -->
+            <div class="card" style="padding:20px">
+                <div class="section-label">منشوراتي</div>
+                <div id="profile-posts-list" style="display:flex;flex-direction:column;gap:10px"></div>
             </div>
-            <div style="font-size:.72rem;font-weight:700;color:rgba(255,255,255,.85);max-width:78px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                ${esc(p.identity)}${p.isLocal?' 👤':''}
-            </div>
-            ${p.isLocal&&isCurrentUserHost?'<div style="font-size:.6rem;color:#f59e0b;font-weight:800">مضيف 👑</div>':''}
-        </div>`;
-    }).join('');
+        </section>
 
-    lg.innerHTML = audience.length
-        ? audience.map(p=>`<div class="listener-bubble" style="background:${getColor(p.identity)}" title="${esc(p.identity)}">${getInitial(p.identity)}</div>`).join('')
-        : '<span style="font-size:.78rem;color:rgba(255,255,255,.3)">لا يوجد جمهور بعد</span>';
-}
+    </main>
+</div>
 
-function updateMicBtn() {
-    if (!currentRoom) return;
-    const btn = document.getElementById('mute-btn');
-    if (!btn) return;
-    const isOn = currentRoom.localParticipant.isMicrophoneEnabled;
-    btn.classList.toggle('active', isOn);
-    btn.innerHTML = isOn
-        ? '<i class="fa-solid fa-microphone"></i>'
-        : '<i class="fa-solid fa-microphone-slash"></i>';
-}
+<!-- ══════ MOBILE NAV ══════ -->
+<nav class="mobile-nav" style="position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.97);backdrop-filter:blur(16px);border-top:1px solid var(--border);padding:8px 0 16px;display:flex;justify-content:space-around;z-index:100">
+    <button class="nav-item active" id="mob-nav-timeline" onclick="navigateTo('timeline')">
+        <i class="fa-solid fa-house"></i> الرئيسية
+    </button>
+    <button class="nav-item" id="mob-nav-rooms" onclick="navigateTo('rooms')">
+        <i class="fa-solid fa-tower-broadcast" style="color:var(--accent)"></i> مجالس
+    </button>
+    <button class="nav-item" id="mob-nav-explore" onclick="navigateTo('explore')">
+        <i class="fa-solid fa-compass"></i> اكتشف
+    </button>
+    <button class="nav-item" id="mob-nav-profile" onclick="navigateTo('profile')">
+        <i class="fa-solid fa-user"></i> أنا
+    </button>
+</nav>
 
-async function toggleMic() {
-    if (!currentRoom) return;
-    try {
-        const next = !currentRoom.localParticipant.isMicrophoneEnabled;
-        await currentRoom.localParticipant.setMicrophoneEnabled(next);
-        updateMicBtn();
-        refreshRoomUI(currentRoom);
-        toast(next?'🎙️ الميكروفون شغّال':'🔇 الميكروفون صامت','info');
-    } catch(e) { toast('تعذر التحكم في الميكروفون','error'); }
-}
-
-function raiseHand() {
-    const btn = document.getElementById('raise-hand-btn');
-    if (!btn) return;
-    const raised = btn.classList.toggle('raised');
-    toast(raised?'✋ رفعت يدك':'أنزلت يدك','info');
-}
-
-async function leaveCurrentAudioRoom(silent=false) {
-    if (currentRoom) {
-        try { currentRoom.disconnect(); } catch(e){}
-        currentRoom=null; currentRoomId=null; currentRoomHostId=null; isCurrentUserHost=false;
-    }
-    window.removeEventListener('beforeunload', quietLeave);
-    document.getElementById('active-room-panel')?.classList.add('hidden');
-    document.body.style.overflow = '';
-    const sg=document.getElementById('speakers-grid');
-    const lg=document.getElementById('listeners-grid');
-    if (sg) sg.innerHTML='';
-    if (lg) lg.innerHTML='';
-    if (!silent) { toast('غادرت المجلس 👋','info'); fetchRooms(); }
-}
-
-function quietLeave() {
-    if (currentRoom) try { currentRoom.disconnect(); } catch(e){}
-}
-
-async function closeCurrentRoom() {
-    if (!currentRoomId||!isCurrentUserHost) return;
-    if (!confirm('إغلاق الغرفة نهائياً؟')) return;
-    const { error } = await db.from('audio_rooms')
-        .update({ is_active:false }).eq('id', currentRoomId);
-    if (error) return toast('فشل الإغلاق: '+error.message,'error');
-    await leaveCurrentAudioRoom();
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ROUTER
-// ══════════════════════════════════════════════════════════════════════════════
-const VIEWS = ['timeline','rooms','explore','profile'];
-
-function navigateTo(view) {
-    VIEWS.forEach(v => {
-        document.getElementById(v+'-view')?.classList.add('hidden');
-        document.getElementById('nav-'+v)?.classList.remove('active');
-        document.getElementById('mob-nav-'+v)?.classList.remove('active');
-    });
-    document.getElementById(view+'-view')?.classList.remove('hidden');
-    document.getElementById('nav-'+view)?.classList.add('active');
-    document.getElementById('mob-nav-'+view)?.classList.add('active');
-
-    if (view === 'rooms')   fetchRooms();
-    if (view === 'explore') renderExplorePage();
-    if (view === 'profile') {
-        if (!currentUser) { openAuthModal(); return; }
-        renderProfilePage();
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// EXPORTS + BOOT
-// ══════════════════════════════════════════════════════════════════════════════
-Object.assign(window, {
-    navigateTo, openAuthModal, closeAuthModal, outsideCloseAuth,
-    switchToSignup, switchToLogin, handleLogin, handleSignup, handleLogout,
-    createPost, handleVote, deletePost, switchTab, filterByTag,
-    showCreateRoomModal, hideCreateRoomModal, outsideCloseRoom,
-    createNewAudioRoom, joinRoom, leaveCurrentAudioRoom, closeCurrentRoom,
-    toggleMic, raiseHand,
-});
-
-document.addEventListener('DOMContentLoaded', async () => {
-    console.log('App starting...');
-    const { data:{ session } } = await db.auth.getSession();
-    currentUser = session?.user ?? null;
-    console.log('Initial session user:', currentUser?.email);
-    updateUIForAuth();
-    await fetchPosts();
-    if (currentUser) fetchMyVotes();
-
-    document.getElementById('post-submit-btn')?.addEventListener('click', createPost);
-
-    document.addEventListener('keydown', e => {
-        if (e.key !== 'Escape') return;
-        if (!document.getElementById('create-room-modal')?.classList.contains('hidden')) hideCreateRoomModal();
-        if (!document.getElementById('auth-modal')?.classList.contains('hidden'))        closeAuthModal();
-    });
-});
+<script src="app.js"></script>
+</body>
+</html>
