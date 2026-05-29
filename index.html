@@ -3,643 +3,391 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pulse — منصة المجتمع الحي</title>
+    <title>Pulse Live Network | غرف صوتية حية</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/livekit-client@1/dist/livekit-client.umd.js"></script>
     <style>
-        :root {
-            --bg: #F7F4EF;
-            --card: #FFFFFF;
-            --accent: #FF4D00;
-            --accent2: #7C3AED;
-            --gold: #F59E0B;
-            --dark: #0F0F0F;
-            --muted: #9CA3AF;
-            --border: #EBEBEB;
-            --room-bg: #0D0D1A;
+        body { background: #F8F5F0; color: #1A1A1A; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .pulse-logo { background: linear-gradient(135deg, #000 60%, #333); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        #sandbox-terminal { background: #0d1117; min-height: 320px; max-height: 500px; overflow-y: auto; }
+        .nav-btn { transition: all .15s; }
+        .nav-btn:hover { background: #f3f4f6; color: #000; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        .fade-in { animation: fadeIn .25s ease both; }
+        .participant-item { transition: background 0.1s ease; }
+
+        /* ── Clubhouse Room Animations ── */
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity:0; }
+            to   { transform: translateY(0);    opacity:1; }
         }
-        * { box-sizing: border-box; }
-        body {
-            background: var(--bg);
-            color: var(--dark);
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            min-height: 100vh;
+        @keyframes fadeInRoom {
+            from { opacity:0; transform:scale(1.02); }
+            to   { opacity:1; transform:scale(1); }
+        }
+        @keyframes blink {
+            0%,100% { opacity:1; } 50% { opacity:.3; }
+        }
+        @keyframes speakPulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(249,168,37,0.7); }
+            50%      { box-shadow: 0 0 0 10px rgba(249,168,37,0); }
+        }
+        @keyframes micActive {
+            0%,100% { box-shadow:0 0 0 0 rgba(34,197,94,0.7); }
+            50%      { box-shadow:0 0 0 8px rgba(34,197,94,0); }
         }
 
-        /* ── Scrollbar ── */
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; }
-
-        /* ── Animations ── */
-        @keyframes fadeUp   { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-        @keyframes fadeIn   { from { opacity:0; } to { opacity:1; } }
-        @keyframes slideUp  { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
-        @keyframes roomIn   { from { opacity:0; transform:scale(.97); } to { opacity:1; transform:scale(1); } }
-        @keyframes blink    { 0%,100%{opacity:1} 50%{opacity:.25} }
-        @keyframes ripple   { 0%{box-shadow:0 0 0 0 rgba(255,77,0,.5)} 100%{box-shadow:0 0 0 16px rgba(255,77,0,0)} }
-        @keyframes speaking { 0%,100%{box-shadow:0 0 0 0 rgba(124,58,237,.7)} 60%{box-shadow:0 0 0 12px rgba(124,58,237,0)} }
-        @keyframes micGlow  { 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.6)} 60%{box-shadow:0 0 0 10px rgba(34,197,94,0)} }
-        @keyframes float    { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
-
-        .fade-up  { animation: fadeUp .3s ease both; }
-        .fade-in  { animation: fadeIn .25s ease both; }
-
-        /* ── Nav ── */
-        .nav-item { 
-            display:flex; flex-direction:column; align-items:center; gap:3px;
-            padding:8px 14px; border-radius:14px; cursor:pointer;
-            font-size:.7rem; font-weight:700; color:var(--muted);
-            transition:all .2s; border:none; background:transparent;
-        }
-        .nav-item:hover { background:#f0ede8; color:var(--dark); }
-        .nav-item.active { color:var(--accent); background:#fff3f0; }
-        .nav-item i { font-size:1.15rem; }
-
-        /* ── Cards ── */
-        .card {
-            background:var(--card);
-            border-radius:20px;
-            border:1px solid var(--border);
-            overflow:hidden;
-        }
-        .card-hover { transition:transform .2s, box-shadow .2s; cursor:pointer; }
-        .card-hover:hover { transform:translateY(-2px); box-shadow:0 8px 32px rgba(0,0,0,.08); }
-
-        /* ── Post Card ── */
-        .post-card { padding:20px; }
-        .post-card + .post-card { border-top:1px solid var(--border); }
-        .reaction-btn {
-            display:flex; align-items:center; gap:5px;
-            padding:5px 12px; border-radius:20px; border:1.5px solid var(--border);
-            font-size:.75rem; font-weight:700; cursor:pointer;
-            background:transparent; transition:all .15s; color:var(--muted);
-        }
-        .reaction-btn:hover { border-color:var(--accent); color:var(--accent); background:#fff3f0; }
-        .reaction-btn.liked { background:#fff3f0; border-color:var(--accent); color:var(--accent); }
-        .reaction-btn.disliked { background:#fef2f2; border-color:#ef4444; color:#ef4444; }
-
-        /* ── Avatar ── */
-        .avatar {
-            border-radius:50%; display:flex; align-items:center; justify-content:center;
-            font-weight:900; flex-shrink:0; color:#fff;
-        }
-        .av-sm  { width:36px; height:36px; font-size:.85rem; }
-        .av-md  { width:48px; height:48px; font-size:1rem; }
-        .av-lg  { width:64px; height:64px; font-size:1.3rem; }
-        .av-xl  { width:80px; height:80px; font-size:1.7rem; }
-        .av-2xl { width:96px; height:96px; font-size:2rem; }
-
-        /* ── Badge ── */
-        .badge {
-            display:inline-flex; align-items:center; gap:4px;
-            padding:3px 10px; border-radius:20px;
-            font-size:.66rem; font-weight:800;
-        }
-        .badge-live { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; }
-        .badge-host { background:#fef3c7; color:#92400e; }
-        .badge-new  { background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; }
-
-        /* ── Btn ── */
-        .btn {
-            display:inline-flex; align-items:center; justify-content:center; gap:7px;
-            padding:11px 22px; border-radius:14px; font-weight:800; font-size:.85rem;
-            cursor:pointer; border:none; transition:all .2s;
-        }
-        .btn-primary { background:var(--dark); color:#fff; }
-        .btn-primary:hover { background:#333; transform:translateY(-1px); box-shadow:0 4px 16px rgba(0,0,0,.25); }
-        .btn-accent  { background:var(--accent); color:#fff; box-shadow:0 4px 16px rgba(255,77,0,.35); }
-        .btn-accent:hover { background:#e04400; transform:translateY(-1px); }
-        .btn-ghost  { background:transparent; border:2px solid var(--border); color:var(--dark); }
-        .btn-ghost:hover { border-color:var(--dark); }
-        .btn-danger { background:#ef4444; color:#fff; box-shadow:0 4px 16px rgba(239,68,68,.35); }
-
-        /* ── Input ── */
-        .input-field {
-            width:100%; padding:12px 16px;
-            border:2px solid var(--border); border-radius:12px;
-            font-size:.9rem; background:#fafafa; outline:none;
-            font-family:inherit; transition:border-color .2s; color:var(--dark);
-        }
-        .input-field:focus { border-color:var(--accent); background:#fff; }
-
-        /* ══════════════════════════════════
-           ROOM STYLES — Clubhouse Premium
-        ══════════════════════════════════ */
-        .room-card {
+        /* ── كارد الغرفة (Clubhouse card) ── */
+        .ch-room-card {
             background:#fff;
-            border-radius:24px;
-            padding:22px;
-            border:1px solid var(--border);
+            border-radius:22px;
+            padding:20px 22px 18px;
+            border:1px solid #f0ede8;
             cursor:pointer;
-            transition:all .2s;
-            position:relative;
-            overflow:hidden;
+            transition:transform .2s, box-shadow .2s;
         }
-        .room-card::before {
-            content:'';
-            position:absolute; top:0; left:0; right:0; height:3px;
-            background:linear-gradient(90deg, var(--accent), var(--accent2));
-            opacity:0; transition:opacity .2s;
+        .ch-room-card:hover {
+            transform:translateY(-3px);
+            box-shadow:0 12px 30px rgba(0,0,0,0.08);
         }
-        .room-card:hover { transform:translateY(-3px); box-shadow:0 12px 40px rgba(0,0,0,.1); }
-        .room-card:hover::before { opacity:1; }
-
-        /* Full-screen room panel */
-        #active-room-panel {
-            position:fixed; inset:0; z-index:200;
-            background:linear-gradient(160deg, #0D0D1A 0%, #111827 50%, #1a0a2e 100%);
-            color:#fff; overflow-y:auto;
-            animation:roomIn .4s cubic-bezier(.34,1.1,.64,1);
-        }
-        .room-inner { max-width:560px; margin:0 auto; padding:24px 20px 140px; }
-
-        .speaker-bubble {
-            display:flex; flex-direction:column; align-items:center; gap:8px;
-            cursor:pointer; transition:transform .2s;
-        }
-        .speaker-bubble:hover { transform:scale(1.05); }
-        .speaker-avatar {
-            position:relative; border-radius:50%;
+        .ch-avatar-speaker {
+            width:72px; height:72px; border-radius:50%;
             display:flex; align-items:center; justify-content:center;
-            font-weight:900; color:#fff; font-size:1.6rem;
-            width:78px; height:78px;
-            border:3px solid rgba(255,255,255,.1);
-            transition:border-color .3s;
+            font-size:1.5rem; font-weight:900; color:#fff;
+            flex-direction:column; gap:4px;
         }
-        .speaker-avatar.speaking { animation:speaking 1.6s infinite; border-color:#7C3AED; }
-        .speaker-mic {
-            position:absolute; bottom:1px; right:1px;
-            width:22px; height:22px; border-radius:50%;
+        .ch-avatar-listener {
+            width:48px; height:48px; border-radius:50%;
             display:flex; align-items:center; justify-content:center;
-            font-size:9px; border:2px solid #0D0D1A;
+            font-size:1rem; font-weight:700; color:#fff;
         }
-        .speaker-mic.on  { background:#22c55e; animation:micGlow 1.2s infinite; }
-        .speaker-mic.off { background:#4b5563; }
-
-        .listener-bubble {
-            width:46px; height:46px; border-radius:50%;
+        .ch-avatar-small {
+            width:40px; height:40px; border-radius:50%;
             display:flex; align-items:center; justify-content:center;
-            font-size:.95rem; font-weight:800; color:#fff;
-            opacity:.8; border:2px solid rgba(255,255,255,.08);
-            cursor:pointer; transition:opacity .2s, transform .2s;
+            font-size:0.9rem; font-weight:700; color:#fff;
         }
-        .listener-bubble:hover { opacity:1; transform:scale(1.1); }
-
-        /* Bottom control bar */
-        .room-controls {
-            position:fixed; bottom:0; left:0; right:0;
-            background:rgba(10,10,20,.95);
-            backdrop-filter:blur(20px);
-            border-top:1px solid rgba(255,255,255,.07);
-            padding:14px 20px 32px;
-        }
-        .room-controls-inner {
-            max-width:560px; margin:0 auto;
-            display:flex; align-items:center; justify-content:center; gap:20px;
-        }
-        .ctrl-btn {
-            border:none; cursor:pointer;
-            border-radius:50%; display:flex; align-items:center; justify-content:center;
-            transition:all .2s; flex-shrink:0;
-        }
-        .ctrl-mic {
-            width:62px; height:62px; font-size:1.25rem;
-            background:rgba(255,255,255,.1); color:#fff;
-        }
-        .ctrl-mic.active { background:rgba(34,197,94,.2); color:#4ade80; animation:micGlow 1.2s infinite; }
-        .ctrl-hand {
-            width:50px; height:50px; font-size:1.1rem;
-            background:rgba(255,255,255,.07); color:rgba(255,255,255,.6);
-        }
-        .ctrl-hand.raised { background:rgba(245,158,11,.2); color:#fbbf24; }
-        .ctrl-leave {
-            padding:14px 22px; border-radius:30px;
-            background:#ef4444; color:#fff;
-            font-weight:800; font-size:.85rem;
-            box-shadow:0 4px 20px rgba(239,68,68,.4);
-            border:none; cursor:pointer;
-            display:flex; align-items:center; gap:8px;
-            transition:all .2s;
-        }
-        .ctrl-leave:hover { background:#dc2626; transform:scale(1.03); }
-
-        /* ── Story ring (explore section) ── */
-        .story-ring {
-            width:64px; height:64px; border-radius:50%;
-            background:linear-gradient(135deg, var(--accent), var(--accent2));
-            padding:2.5px; flex-shrink:0; cursor:pointer;
-        }
-        .story-ring-inner {
-            width:100%; height:100%; border-radius:50%;
-            border:2.5px solid var(--bg);
-            display:flex; align-items:center; justify-content:center;
-            font-size:1.1rem; font-weight:900; color:#fff;
-        }
-
-        /* ── Trending tag ── */
-        .trend-tag {
-            display:inline-flex; align-items:center; gap:5px;
-            padding:6px 14px; border-radius:20px;
-            background:#f4f1ee; font-size:.78rem; font-weight:700;
-            cursor:pointer; transition:all .15s; border:none; color:var(--dark);
-        }
-        .trend-tag:hover { background:var(--dark); color:#fff; }
-
-        /* ── Tab ── */
-        .tab-btn {
-            padding:8px 18px; border-radius:20px; font-size:.8rem; font-weight:700;
-            cursor:pointer; border:none; transition:all .15s; color:var(--muted); background:transparent;
-        }
-        .tab-btn.active { background:var(--dark); color:#fff; }
-
-        /* ── Modal ── */
-        .modal-overlay {
-            position:fixed; inset:0;
-            background:rgba(0,0,0,.6); backdrop-filter:blur(8px);
-            z-index:300; display:flex; align-items:flex-end; justify-content:center;
-        }
-        .modal-sheet {
-            background:#fff; border-radius:28px 28px 0 0;
-            padding:28px 24px 44px; width:100%; max-width:520px;
-            animation:slideUp .35s cubic-bezier(.34,1.1,.64,1);
-        }
-        .modal-handle {
-            width:40px; height:4px; background:#e5e7eb;
-            border-radius:4px; margin:0 auto 22px;
-        }
-
-        /* ── Misc ── */
-        .divider { height:1px; background:var(--border); margin:16px 0; }
-        .section-label { font-size:.68rem; font-weight:800; color:var(--muted); letter-spacing:1.2px; text-transform:uppercase; margin-bottom:14px; }
-        .hidden { display:none !important; }
-        .pill { padding:4px 12px; border-radius:20px; font-size:.72rem; font-weight:700; }
-
-        /* Responsive */
-        @media(min-width:768px){
-            .layout { display:grid; grid-template-columns:280px 1fr; gap:24px; max-width:960px; margin:0 auto; padding:24px 16px; }
-            .mobile-nav { display:none; }
-            .desktop-sidebar { display:block; }
-        }
-        @media(max-width:767px){
-            .layout { padding:16px 12px 90px; }
-            .desktop-sidebar { display:none; }
-            .mobile-nav { display:flex; }
-        }
-
-        /* ── Composer ── */
-        #post-textarea {
-            width:100%; padding:14px; min-height:90px; resize:none;
-            border:none; outline:none; font-size:.9rem; line-height:1.6;
-            font-family:inherit; background:transparent; color:var(--dark);
-        }
-        #post-textarea::placeholder { color:var(--muted); }
-
-        /* ── Explore Stories scroll ── */
-        .stories-scroll { display:flex; gap:14px; overflow-x:auto; padding-bottom:4px; }
-        .stories-scroll::-webkit-scrollbar { display:none; }
+        .ch-mic-active { animation: speakPulse 1.5s infinite; }
+        .mute-active   { animation: micActive 1s infinite; }
     </style>
 </head>
-<body>
+<body class="min-h-full antialiased">
 
-<!-- ══════ TOAST ══════ -->
-<div id="status-msg" class="hidden" style="position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:999;background:#0f0f0f;color:#fff;padding:10px 22px;border-radius:30px;font-size:.82rem;font-weight:700;box-shadow:0 8px 30px rgba(0,0,0,.25);white-space:nowrap;max-width:90vw;text-align:center"></div>
+<!-- Toast رسالة -->
+<div id="status-msg" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-black text-white px-5 py-2.5 rounded-full text-sm font-medium shadow-xl hidden"></div>
 
-<!-- ══════ AUTH MODAL ══════ -->
-<div id="auth-modal" class="hidden modal-overlay" onclick="outsideCloseAuth(event)">
-    <div class="modal-sheet" style="max-width:440px">
-        <div class="modal-handle"></div>
-        <div style="text-align:center;margin-bottom:24px">
-            <div style="font-size:2rem;margin-bottom:8px">⚡</div>
-            <h2 id="auth-modal-title" style="font-size:1.35rem;font-weight:900;color:var(--dark)">تسجيل الدخول</h2>
-            <p style="font-size:.82rem;color:var(--muted);margin-top:4px">مرحباً بك في Pulse</p>
+<!-- ══════════════════════════════════════════
+     AUTH MODAL
+══════════════════════════════════════════ -->
+<div id="auth-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl p-7 w-full max-w-md shadow-2xl border border-gray-100 relative fade-in">
+        <button onclick="closeAuthModal()" class="absolute top-4 left-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-black transition">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+        <div class="flex justify-center mb-6">
+            <span class="text-2xl font-black tracking-widest pulse-logo">PULSE LIVE</span>
         </div>
+        <h2 id="auth-modal-title" class="text-xl font-bold mb-5 text-center text-black">تسجيل الدخول</h2>
 
-        <!-- Login -->
+        <!-- Login Form -->
         <div id="login-form" class="space-y-3">
-            <input type="email" id="login-email" class="input-field" placeholder="البريد الإلكتروني">
-            <input type="password" id="login-password" class="input-field" placeholder="كلمة المرور"
-                onkeydown="if(event.key==='Enter') handleLogin()">
-            <button onclick="handleLogin()" class="btn btn-primary" style="width:100%;justify-content:center;padding:14px">
-                دخول <i class="fa-solid fa-arrow-left"></i>
+            <input type="email" id="login-email" placeholder="البريد الإلكتروني"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <input type="password" id="login-password" placeholder="كلمة المرور"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <button onclick="handleLogin()"
+                class="w-full bg-black text-white p-3 rounded-xl font-bold hover:bg-gray-800 transition text-sm">
+                <i class="fa-solid fa-right-to-bracket ml-2"></i>دخول
             </button>
-            <p style="text-align:center;font-size:.8rem;color:var(--muted);margin-top:10px">
-                مش عندك حساب؟
-                <span onclick="switchToSignup()" style="color:var(--accent);font-weight:800;cursor:pointer"> سجّل الآن</span>
+            <p class="text-center text-xs text-gray-500 pt-1">
+                ليس لديك حساب؟
+                <a href="#" onclick="switchToSignup()" class="text-black font-bold hover:underline">إنشاء حساب</a>
             </p>
         </div>
 
-        <!-- Signup -->
-        <div id="signup-form" class="hidden space-y-3">
-            <input type="text"     id="signup-name"     class="input-field" placeholder="الاسم الكامل">
-            <input type="email"    id="signup-email"    class="input-field" placeholder="البريد الإلكتروني">
-            <input type="password" id="signup-password" class="input-field" placeholder="كلمة المرور (6+ أحرف)"
-                onkeydown="if(event.key==='Enter') handleSignup()">
-            <button onclick="handleSignup()" class="btn btn-accent" style="width:100%;justify-content:center;padding:14px">
-                إنشاء الحساب ✨
+        <!-- Signup Form -->
+        <div id="signup-form" class="space-y-3 hidden">
+            <input type="text" id="signup-name" placeholder="الاسم الكامل"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <input type="email" id="signup-email" placeholder="البريد الإلكتروني"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <input type="password" id="signup-password" placeholder="كلمة المرور (6 أحرف على الأقل)"
+                class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm">
+            <button onclick="handleSignup()"
+                class="w-full bg-black text-white p-3 rounded-xl font-bold hover:bg-gray-800 transition text-sm">
+                <i class="fa-solid fa-user-plus ml-2"></i>إنشاء الحساب
             </button>
-            <p style="text-align:center;font-size:.8rem;color:var(--muted);margin-top:10px">
-                عندك حساب؟
-                <span onclick="switchToLogin()" style="color:var(--accent);font-weight:800;cursor:pointer"> سجّل دخول</span>
+            <p class="text-center text-xs text-gray-500 pt-1">
+                لديك حساب؟
+                <a href="#" onclick="switchToLogin()" class="text-black font-bold hover:underline">تسجيل دخول</a>
             </p>
         </div>
     </div>
 </div>
 
-<!-- ══════ CREATE ROOM MODAL ══════ -->
-<div id="create-room-modal" class="hidden modal-overlay" onclick="outsideCloseRoom(event)">
-    <div class="modal-sheet">
-        <div class="modal-handle"></div>
-        <h3 style="font-size:1.15rem;font-weight:900;color:var(--dark);margin-bottom:6px;text-align:center">أطلق مجلساً 🎙️</h3>
-        <p style="font-size:.8rem;color:var(--muted);text-align:center;margin-bottom:20px">ابدأ نقاشاً مباشراً مع المجتمع</p>
-        <input type="text" id="room-title-input" class="input-field"
-            placeholder="عنوان المجلس... (مثال: نقاش عن الذكاء الاصطناعي)"
-            onkeydown="if(event.key==='Enter') createNewAudioRoom()">
-        <div style="display:flex;gap:10px;margin-top:14px">
-            <button onclick="hideCreateRoomModal()" class="btn btn-ghost" style="flex:1;justify-content:center">إلغاء</button>
-            <button onclick="createNewAudioRoom()" class="btn btn-accent" style="flex:2;justify-content:center">ابدأ الآن 🚀</button>
-        </div>
-    </div>
-</div>
+<!-- ══════════════════════════════════════════
+     LAYOUT
+══════════════════════════════════════════ -->
+<div class="max-w-6xl mx-auto px-3 py-5 grid grid-cols-1 md:grid-cols-4 gap-5">
 
-<!-- ══════ ACTIVE ROOM PANEL ══════ -->
-<div id="active-room-panel" class="hidden">
-    <div class="room-inner">
+    <!-- ── SIDEBAR ── -->
+    <aside class="md:col-span-1 space-y-4">
 
-        <!-- Top bar -->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-            <button onclick="leaveCurrentAudioRoom()"
-                style="background:rgba(255,255,255,.08);border:none;color:#fff;padding:8px 16px;border-radius:30px;font-size:.78rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px">
-                <i class="fa-solid fa-chevron-down"></i> مغادرة بهدوء
+        <!-- Brand + Auth -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+            <h1 class="text-xl font-black tracking-widest text-center mb-4 pulse-logo">PULSE LIVE</h1>
+
+            <!-- زر تسجيل الدخول (للزوار) -->
+            <button id="auth-toggle-btn" onclick="openAuthModal()"
+                class="w-full bg-black text-white py-2.5 px-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-800 transition text-sm">
+                <i class="fa-solid fa-right-to-bracket"></i> تسجيل دخول
             </button>
-            <span class="badge badge-live" style="font-size:.68rem">
-                <span style="width:6px;height:6px;background:#ef4444;border-radius:50%;animation:blink 1.2s infinite;display:inline-block"></span>
-                مباشر
-            </span>
-            <button id="close-active-room-btn" onclick="closeCurrentRoom()"
-                style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#f87171;padding:8px 14px;border-radius:30px;font-size:.78rem;font-weight:700;cursor:pointer">
-                <i class="fa-solid fa-door-closed"></i> إغلاق
-            </button>
-        </div>
 
-        <!-- Room title -->
-        <div style="text-align:center;margin:30px 0 36px">
-            <div id="active-room-title" style="font-size:1.5rem;font-weight:900;color:#fff;line-height:1.3">—</div>
-            <div id="active-room-role" style="margin-top:8px;font-size:.78rem;color:rgba(255,255,255,.45)">دورك: مستمع</div>
-        </div>
-
-        <!-- Speakers -->
-        <div class="section-label" style="color:rgba(255,255,255,.35)">المتحدثون على المسرح</div>
-        <div id="speakers-grid" style="display:flex;flex-wrap:wrap;gap:18px;justify-content:center;margin-bottom:32px"></div>
-
-        <div class="divider" style="background:rgba(255,255,255,.07)"></div>
-
-        <!-- Listeners -->
-        <div class="section-label" style="color:rgba(255,255,255,.35);margin-top:20px">في الجمهور</div>
-        <div id="listeners-grid" style="display:flex;flex-wrap:wrap;gap:10px"></div>
-
-        <!-- hidden compat -->
-        <div id="room-participants-list" class="hidden"></div>
-    </div>
-
-    <!-- Controls -->
-    <div class="room-controls">
-        <div class="room-controls-inner">
-            <button id="mute-btn" onclick="toggleMic()" class="ctrl-btn ctrl-mic" data-muted="true">
-                <i class="fa-solid fa-microphone-slash"></i>
-            </button>
-            <button id="raise-hand-btn" onclick="raiseHand()" class="ctrl-btn ctrl-hand">✋</button>
-            <button onclick="leaveCurrentAudioRoom()" class="ctrl-leave">
-                <i class="fa-solid fa-phone-slash"></i> مغادرة
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- ══════ MAIN LAYOUT ══════ -->
-<div class="layout">
-
-    <!-- ═══ DESKTOP SIDEBAR ═══ -->
-    <aside class="desktop-sidebar">
-
-        <!-- Logo -->
-        <div style="padding:8px 4px 24px">
-            <div style="display:flex;align-items:center;gap:10px">
-                <div style="width:38px;height:38px;background:var(--dark);border-radius:12px;display:flex;align-items:center;justify-content:center">
-                    <span style="color:#fff;font-size:1.1rem;font-weight:900">P</span>
+            <!-- بطاقة المستخدم (بعد الدخول) -->
+            <div id="user-profile-card" class="hidden space-y-3">
+                <div class="flex flex-col items-center gap-2 pb-2 border-b border-gray-100">
+                    <div id="user-avatar-letter"
+                        class="w-14 h-14 bg-black text-white font-black text-xl rounded-full flex items-center justify-center shadow">
+                        م
+                    </div>
+                    <h3 id="user-display-name" class="font-bold text-sm text-black truncate max-w-full">...</h3>
                 </div>
-                <span style="font-size:1.3rem;font-weight:900;color:var(--dark)">Pulse</span>
+                <!-- Navigation -->
+                <nav class="flex flex-col gap-1">
+                    <button onclick="navigateTo('timeline')" class="nav-btn text-sm text-gray-600 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2">
+                        <i class="fa-solid fa-house w-4 text-center"></i> الرئيسية
+                    </button>
+                    <button onclick="navigateTo('rooms')" class="nav-btn text-sm text-gray-600 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2">
+                        <i class="fa-solid fa-headset w-4 text-center"></i> الغرف الصوتية
+                    </button>
+                    <button onclick="navigateTo('sandbox')" class="nav-btn text-sm text-gray-600 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2">
+                        <i class="fa-solid fa-code w-4 text-center"></i> مشغّل الأكواد
+                    </button>
+                    <button onclick="navigateTo('profile')" class="nav-btn text-sm text-gray-600 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2">
+                        <i class="fa-solid fa-user w-4 text-center"></i> ملفي الشخصي
+                    </button>
+                    <button onclick="handleLogout()" class="nav-btn text-sm text-red-500 font-medium text-right px-3 py-2 rounded-xl flex items-center gap-2 hover:bg-red-50">
+                        <i class="fa-solid fa-arrow-right-from-bracket w-4 text-center"></i> خروج
+                    </button>
+                </nav>
             </div>
         </div>
 
-        <!-- Nav -->
-        <nav style="display:flex;flex-direction:column;gap:4px;margin-bottom:24px">
-            <button class="nav-item active" id="nav-timeline" onclick="navigateTo('timeline')" style="flex-direction:row;justify-content:flex-start;gap:12px;padding:12px 16px;border-radius:14px;font-size:.9rem">
-                <i class="fa-solid fa-house"></i> الرئيسية
-            </button>
-            <button class="nav-item" id="nav-rooms" onclick="navigateTo('rooms')" style="flex-direction:row;justify-content:flex-start;gap:12px;padding:12px 16px;border-radius:14px;font-size:.9rem">
-                <i class="fa-solid fa-tower-broadcast"></i> المجالس الصوتية
-            </button>
-            <button class="nav-item" id="nav-explore" onclick="navigateTo('explore')" style="flex-direction:row;justify-content:flex-start;gap:12px;padding:12px 16px;border-radius:14px;font-size:.9rem">
-                <i class="fa-solid fa-compass"></i> اكتشف
-            </button>
-            <button class="nav-item" id="nav-profile" onclick="navigateTo('profile')" style="flex-direction:row;justify-content:flex-start;gap:12px;padding:12px 16px;border-radius:14px;font-size:.9rem">
-                <i class="fa-solid fa-user"></i> حسابي
-            </button>
-        </nav>
-
-        <!-- Auth card -->
-        <div id="auth-toggle-btn">
-            <button onclick="openAuthModal()" class="btn btn-primary" style="width:100%;justify-content:center">
-                <i class="fa-solid fa-bolt"></i> دخول / تسجيل
-            </button>
-        </div>
-
-        <div id="user-profile-card" class="hidden card" style="padding:16px">
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-                <div class="avatar av-md" id="user-avatar-letter" style="background:var(--dark)">م</div>
-                <div style="min-width:0">
-                    <div id="user-display-name" style="font-weight:800;font-size:.9rem;color:var(--dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">...</div>
-                    <div id="user-email-display" style="font-size:.72rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
-                </div>
+        <!-- Stats Card -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-2">
+            <h4 class="text-xs font-bold uppercase text-gray-400 tracking-wider mb-3">إحصائيات المنصة</h4>
+            <div class="flex justify-between text-sm">
+                <span class="text-gray-500">المنشورات</span>
+                <span class="font-bold text-black" id="stat-posts">—</span>
             </div>
-            <button onclick="handleLogout()" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:.8rem;padding:9px">
-                <i class="fa-solid fa-right-from-bracket"></i> خروج
-            </button>
-        </div>
-
-        <!-- Stats -->
-        <div class="card" style="padding:16px;margin-top:16px">
-            <div style="font-size:.68rem;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">إحصائيات المنصة</div>
-            <div style="display:flex;flex-direction:column;gap:10px">
-                <div style="display:flex;justify-content:space-between;align-items:center">
-                    <span style="font-size:.8rem;color:var(--muted)"><i class="fa-solid fa-file-lines fa-fw" style="margin-left:6px"></i>منشورات</span>
-                    <span id="stat-posts" style="font-weight:900;font-size:.9rem">—</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center">
-                    <span style="font-size:.8rem;color:var(--muted)"><i class="fa-solid fa-tower-broadcast fa-fw" style="margin-left:6px;color:var(--accent)"></i>مجالس حية</span>
-                    <span id="stat-rooms" style="font-weight:900;font-size:.9rem;color:var(--accent)">—</span>
-                </div>
+            <div class="flex justify-between text-sm">
+                <span class="text-gray-500">الغرف النشطة</span>
+                <span class="font-bold text-black" id="stat-rooms">—</span>
             </div>
         </div>
-
     </aside>
 
-    <!-- ═══ MAIN CONTENT ═══ -->
-    <main>
+    <!-- ── MAIN CONTENT ── -->
+    <main class="md:col-span-3 space-y-5">
 
-        <!-- ─── TIMELINE VIEW ─── -->
-        <section id="timeline-view" class="fade-in" style="display:flex;flex-direction:column;gap:16px">
-
-            <!-- Composer logged in -->
-            <div id="composer-logged-in" class="hidden card" style="padding:0">
-                <div style="display:flex;gap:12px;padding:18px 18px 0">
-                    <div class="avatar av-sm" id="composer-avatar" style="background:var(--dark);margin-top:4px">م</div>
-                    <textarea id="post-textarea" placeholder="شاركنا ما يدور في ذهنك..."></textarea>
-                </div>
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 18px 14px;border-top:1px solid var(--border);margin-top:10px">
-                    <div style="display:flex;gap:8px">
-                        <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.85rem" title="صورة"><i class="fa-regular fa-image"></i></button>
-                        <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.85rem" title="رابط"><i class="fa-solid fa-link"></i></button>
-                        <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.85rem" title="وسم"><i class="fa-solid fa-hashtag"></i></button>
-                    </div>
-                    <button id="post-submit-btn" onclick="createPost()" class="btn btn-primary" style="padding:8px 18px;font-size:.82rem">
-                        نشر <i class="fa-solid fa-paper-plane"></i>
+        <!-- ════ TIMELINE VIEW ════ -->
+        <section id="timeline-view" class="space-y-4 fade-in">
+            <div id="composer-logged-in" class="hidden bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+                <textarea id="post-textarea" rows="3"
+                    placeholder="بم تفكر اليوم؟ شارك المجتمع فكرتك..."
+                    class="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-black text-sm text-black leading-relaxed"></textarea>
+                <div class="flex justify-between items-center">
+                    <span class="text-xs text-gray-400"><i class="fa-solid fa-lock-open ml-1"></i>منشور عام</span>
+                    <button id="post-submit-btn"
+                        class="bg-black text-white px-6 py-2.5 rounded-xl font-bold hover:bg-gray-800 transition shadow-sm text-sm">
+                        <i class="fa-solid fa-paper-plane ml-1"></i> نشر
                     </button>
                 </div>
             </div>
+            <div id="composer-logged-out" class="bg-amber-50 border border-amber-100 p-4 rounded-2xl text-center text-amber-700 font-medium text-sm">
+                🔒 سجّل دخولك للمشاركة في النقاشات وكتابة المنشورات
+                <button onclick="openAuthModal()" class="mr-2 underline font-bold hover:text-amber-900">دخول الآن</button>
+            </div>
+            <div id="posts-container" class="space-y-4"></div>
+        </section>
 
-            <!-- Composer logged out -->
-            <div id="composer-logged-out" class="card" style="padding:20px;text-align:center">
-                <div style="font-size:1.6rem;margin-bottom:8px">👋</div>
-                <p style="font-size:.88rem;font-weight:600;color:var(--dark);margin-bottom:12px">انضم لمجتمع Pulse وشارك أفكارك</p>
-                <button onclick="openAuthModal()" class="btn btn-accent" style="padding:10px 24px">
-                    ابدأ الآن — مجاناً ✨
+        <!-- ════ ROOMS VIEW (صوتية متقدمة مع LiveKit) ════ -->
+        <!-- ════ ROOMS VIEW — Clubhouse Style ════ -->
+        <section id="rooms-view" class="hidden fade-in" style="direction:rtl">
+
+            <!-- ── هيدر الغرف ── -->
+            <div style="background:#fff;border-radius:20px;padding:20px 24px;border:1px solid #f0ede8;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+                <div>
+                    <h2 style="font-size:1.25rem;font-weight:900;color:#1a1a1a;margin:0;display:flex;align-items:center;gap:8px">
+                        🎙️ المجالس الصوتية
+                    </h2>
+                    <p style="font-size:0.75rem;color:#888;margin:4px 0 0">انضم للنقاشات المباشرة واستمع للأصوات الحية</p>
+                </div>
+                <button onclick="showCreateRoomModal()" id="open-create-room-btn"
+                    style="background:linear-gradient(135deg,#f9a825,#ff6f00);color:#fff;border:none;padding:10px 20px;border-radius:14px;font-weight:800;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:6px;box-shadow:0 4px 14px rgba(249,168,37,0.4)">
+                    <i class="fa-solid fa-plus"></i> إطلاق مجلس
                 </button>
             </div>
 
-            <!-- Feed tabs -->
-            <div style="display:flex;gap:6px;padding:4px 0">
-                <button class="tab-btn active" id="tab-latest" onclick="switchTab('latest')">🔥 الأحدث</button>
-                <button class="tab-btn" id="tab-top" onclick="switchTab('top')">⬆️ الأعلى تقييماً</button>
+            <!-- ── مودال إنشاء الغرفة ── -->
+            <div id="create-room-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);z-index:200;align-items:flex-end;justify-content:center" onclick="hideCreateRoomModal(event)">
+                <div style="background:#fff;border-radius:28px 28px 0 0;padding:28px 24px 40px;width:100%;max-width:520px;animation:slideUp .35s cubic-bezier(.34,1.56,.64,1)">
+                    <div style="width:40px;height:4px;background:#e0e0e0;border-radius:4px;margin:0 auto 20px"></div>
+                    <h3 style="font-size:1.1rem;font-weight:900;color:#1a1a1a;margin:0 0 16px;text-align:center">أطلق مجلساً جديداً 🚀</h3>
+                    <input type="text" id="room-title-input" placeholder="عنوان المجلس... (مثال: نقاش التقنية والمستقبل)"
+                        style="width:100%;padding:14px 16px;border:2px solid #f0ede8;border-radius:14px;font-size:0.9rem;background:#fafafa;outline:none;box-sizing:border-box;font-family:inherit;color:#1a1a1a"
+                        onfocus="this.style.borderColor='#f9a825'" onblur="this.style.borderColor='#f0ede8'">
+                    <div style="display:flex;gap:10px;margin-top:14px">
+                        <button onclick="hideCreateRoomModal()" style="flex:1;padding:13px;border:2px solid #eee;border-radius:14px;background:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;color:#666">إلغاء</button>
+                        <button onclick="createNewAudioRoom()" style="flex:2;padding:13px;background:linear-gradient(135deg,#f9a825,#ff6f00);color:#fff;border:none;border-radius:14px;font-weight:800;font-size:0.9rem;cursor:pointer;box-shadow:0 4px 14px rgba(249,168,37,0.4)">ابدأ الآن ✨</button>
+                    </div>
+                </div>
             </div>
 
-            <!-- Posts -->
-            <div id="posts-container" style="display:flex;flex-direction:column;gap:12px"></div>
+            <!-- ── لوحة الغرفة النشطة (كلوب هاوس full screen) ── -->
+            <div id="active-room-panel" style="display:none;position:fixed;inset:0;z-index:150;background:linear-gradient(160deg,#1a1a2e 0%,#16213e 40%,#0f3460 100%);color:#fff;overflow-y:auto;animation:fadeInRoom .4s ease">
+                <div style="max-width:600px;margin:0 auto;padding:24px 20px 120px">
+
+                    <!-- هيدر الغرفة -->
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                        <button onclick="leaveCurrentAudioRoom()" style="background:rgba(255,255,255,.1);border:none;color:#fff;padding:8px 16px;border-radius:30px;font-weight:700;font-size:0.8rem;cursor:pointer;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px)">
+                            <i class="fa-solid fa-chevron-down"></i> مغادرة بهدوء
+                        </button>
+                        <span style="background:rgba(239,68,68,0.2);color:#f87171;border:1px solid rgba(239,68,68,.3);padding:4px 12px;border-radius:20px;font-size:0.7rem;font-weight:800;display:flex;align-items:center;gap:5px">
+                            <span style="width:6px;height:6px;background:#ef4444;border-radius:50%;animation:blink 1.2s infinite"></span> مباشر
+                        </span>
+                        <button id="close-active-room-btn" onclick="closeCurrentRoom()" style="display:none;background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.3);color:#f87171;padding:8px 16px;border-radius:30px;font-weight:700;font-size:0.8rem;cursor:pointer">
+                            <i class="fa-solid fa-door-closed"></i> إغلاق الغرفة
+                        </button>
+                    </div>
+
+                    <!-- عنوان الغرفة -->
+                    <div style="text-align:center;margin:28px 0">
+                        <div style="font-size:1.6rem;font-weight:900;color:#fff;line-height:1.3" id="active-room-title">—</div>
+                        <div style="margin-top:8px;font-size:0.8rem;color:rgba(255,255,255,.5)" id="active-room-role">دورك: مستمع</div>
+                    </div>
+
+                    <!-- المتحدثون (الدائرات الكبيرة) -->
+                    <div style="margin-bottom:24px">
+                        <p style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;margin:0 0 16px">المتحدثون</p>
+                        <div id="speakers-grid" style="display:flex;flex-wrap:wrap;gap:20px;justify-content:center"></div>
+                    </div>
+
+                    <!-- فاصل -->
+                    <div style="height:1px;background:rgba(255,255,255,.08);margin:20px 0"></div>
+
+                    <!-- المستمعون (دوائر أصغر) -->
+                    <div>
+                        <p style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;margin:0 0 16px">في الجمهور</p>
+                        <div id="listeners-grid" style="display:flex;flex-wrap:wrap;gap:12px"></div>
+                    </div>
+
+                    <!-- hidden container for backward compat -->
+                    <div id="room-participants-list" style="display:none"></div>
+                </div>
+
+                <!-- شريط التحكم السفلي -->
+                <div style="position:fixed;bottom:0;left:0;right:0;background:rgba(15,20,40,0.95);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,.08);padding:16px 24px 28px">
+                    <div style="max-width:600px;margin:0 auto;display:flex;align-items:center;justify-content:center;gap:24px">
+                        <button id="mute-btn" onclick="toggleMic()" data-muted="true"
+                            style="width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.3rem;background:rgba(255,255,255,.12);color:#fff;position:relative">
+                            <i class="fa-solid fa-microphone-slash"></i>
+                        </button>
+                        <button onclick="raiseHand()" id="raise-hand-btn"
+                            style="width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.1rem;background:rgba(255,255,255,.08);color:rgba(255,255,255,.7)">
+                            ✋
+                        </button>
+                        <button onclick="leaveCurrentAudioRoom()"
+                            style="padding:14px 24px;background:#ef4444;border:none;border-radius:30px;color:#fff;font-weight:800;font-size:0.85rem;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(239,68,68,.4)">
+                            <i class="fa-solid fa-phone-slash"></i> مغادرة
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── شبكة الغرف المتاحة ── -->
+            <div id="rooms-grid" style="display:grid;grid-template-columns:1fr;gap:14px"></div>
+
+            <!-- حالة فارغة -->
+            <div id="rooms-empty-state" style="display:none;text-align:center;padding:60px 20px">
+                <div style="font-size:3rem;margin-bottom:16px">🎙️</div>
+                <h3 style="font-size:1.1rem;font-weight:800;color:#1a1a1a;margin:0 0 8px">لا توجد مجالس نشطة</h3>
+                <p style="font-size:0.85rem;color:#888;margin:0 0 20px">كن أول من يطلق مجلساً اليوم!</p>
+                <button onclick="showCreateRoomModal()" style="background:linear-gradient(135deg,#f9a825,#ff6f00);color:#fff;border:none;padding:12px 24px;border-radius:14px;font-weight:800;font-size:0.85rem;cursor:pointer">ابدأ مجلساً جديداً</button>
+            </div>
         </section>
 
-        <!-- ─── ROOMS VIEW ─── -->
-        <section id="rooms-view" class="hidden fade-in" style="display:flex;flex-direction:column;gap:16px">
-
-            <!-- Header -->
-            <div class="card" style="padding:20px 22px">
-                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-                    <div>
-                        <h2 style="font-size:1.15rem;font-weight:900;color:var(--dark);margin:0;display:flex;align-items:center;gap:8px">
-                            🎙️ المجالس الصوتية
-                        </h2>
-                        <p style="font-size:.75rem;color:var(--muted);margin:4px 0 0">نقاشات مباشرة — انضم أو ابدأ الآن</p>
+        <!-- ════ SANDBOX VIEW ════ -->
+        <section id="sandbox-view" class="hidden space-y-4 fade-in">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                <h2 class="text-xl font-black text-black flex items-center gap-2">
+                    <i class="fa-solid fa-terminal text-green-600"></i> مشغّل المستودعات السحابي
+                </h2>
+                <p class="text-xs text-gray-500">أدخل رابط مستودع GitHub (Python أو Node.js) وسيتم استنساخه وتشغيله فوراً.</p>
+                <div class="space-y-3">
+                    <input type="url" id="sandbox-repo-url"
+                        placeholder="https://github.com/username/repository"
+                        class="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm font-mono">
+                    <div class="flex gap-2">
+                        <input type="text" id="sandbox-entry-file"
+                            placeholder="نقطة الدخول (اختياري، مثال: main.py)"
+                            class="flex-1 p-3 border border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black text-sm font-mono">
+                        <button id="sandbox-run-btn" onclick="runSandbox()"
+                            class="bg-green-600 hover:bg-green-700 text-white px-5 py-3 rounded-xl font-bold text-sm transition whitespace-nowrap">
+                            <i class="fa-solid fa-play ml-1"></i> تشغيل
+                        </button>
+                        <button onclick="stopSandbox()"
+                            class="bg-red-500 hover:bg-red-600 text-white px-4 py-3 rounded-xl font-bold text-sm transition">
+                            <i class="fa-solid fa-stop"></i>
+                        </button>
                     </div>
-                    <button onclick="showCreateRoomModal()" class="btn btn-accent" style="padding:10px 18px;font-size:.82rem">
-                        <i class="fa-solid fa-plus"></i> إطلاق مجلس
+                </div>
+            </div>
+            <div class="rounded-2xl overflow-hidden border border-gray-800 shadow-xl">
+                <div class="bg-gray-800 px-4 py-2 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="w-3 h-3 bg-red-500 rounded-full"></span>
+                        <span class="w-3 h-3 bg-yellow-500 rounded-full"></span>
+                        <span class="w-3 h-3 bg-green-500 rounded-full"></span>
+                        <span class="text-gray-400 text-xs font-mono mr-2">pulse-sandbox ~ bash</span>
+                    </div>
+                    <button onclick="clearTerminal()" class="text-gray-500 hover:text-gray-300 text-xs transition">
+                        <i class="fa-solid fa-trash-can ml-1"></i>مسح
                     </button>
                 </div>
-            </div>
-
-            <!-- Rooms grid -->
-            <div id="rooms-grid" style="display:flex;flex-direction:column;gap:14px"></div>
-
-            <!-- Empty state -->
-            <div id="rooms-empty-state" class="hidden" style="text-align:center;padding:60px 20px">
-                <div style="font-size:3.5rem;margin-bottom:16px;animation:float 3s ease-in-out infinite">🎙️</div>
-                <h3 style="font-size:1.05rem;font-weight:800;color:var(--dark);margin:0 0 8px">لا توجد مجالس نشطة</h3>
-                <p style="font-size:.85rem;color:var(--muted);margin:0 0 20px">كن أول من يطلق نقاشاً اليوم!</p>
-                <button onclick="showCreateRoomModal()" class="btn btn-accent">ابدأ مجلساً جديداً 🚀</button>
+                <div id="sandbox-terminal" class="p-4 font-mono text-xs text-gray-300 leading-relaxed bg-[#0d1117]" style="min-height: 320px;">
+                    <div class="text-green-400">● Pulse Sandbox Engine جاهز. أدخل رابط المستودع وابدأ.</div>
+                </div>
             </div>
         </section>
 
-        <!-- ─── EXPLORE VIEW ─── -->
-        <section id="explore-view" class="hidden fade-in" style="display:flex;flex-direction:column;gap:16px">
-            <div class="card" style="padding:20px">
-                <h2 style="font-size:1.1rem;font-weight:900;margin:0 0 16px">🔍 اكتشف المجتمع</h2>
-
-                <!-- Trending tags -->
-                <div class="section-label">الأكثر تداولاً</div>
-                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px" id="trending-tags">
-                    <button class="trend-tag" onclick="filterByTag('تقنية')">#تقنية</button>
-                    <button class="trend-tag" onclick="filterByTag('ذكاء_اصطناعي')">#ذكاء_اصطناعي</button>
-                    <button class="trend-tag" onclick="filterByTag('ريادة')">#ريادة</button>
-                    <button class="trend-tag" onclick="filterByTag('برمجة')">#برمجة</button>
-                    <button class="trend-tag" onclick="filterByTag('إبداع')">#إبداع</button>
-                    <button class="trend-tag" onclick="filterByTag('ثقافة')">#ثقافة</button>
-                </div>
-
-                <!-- Top posts preview -->
-                <div class="section-label">أبرز المنشورات</div>
-                <div id="explore-posts" style="display:flex;flex-direction:column;gap:12px"></div>
-            </div>
-        </section>
-
-        <!-- ─── PROFILE VIEW ─── -->
-        <section id="profile-view" class="hidden fade-in" style="display:flex;flex-direction:column;gap:16px">
-            <div class="card" style="padding:28px 24px">
-                <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
-                    <div class="avatar av-xl" id="profile-avatar" style="background:var(--dark)">م</div>
-                    <div>
-                        <h2 id="profile-display-name" style="font-size:1.25rem;font-weight:900;margin:0 0 3px">—</h2>
-                        <p id="profile-username" style="font-size:.8rem;color:var(--muted);margin:0"></p>
-                        <span class="badge badge-new" style="margin-top:8px;display:inline-flex">✦ عضو Pulse</span>
-                    </div>
-                </div>
-
-                <!-- Stats row -->
-                <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:14px;overflow:hidden">
-                    <div style="flex:1;padding:14px;text-align:center;border-left:1px solid var(--border)">
-                        <div id="profile-posts-count" style="font-size:1.4rem;font-weight:900">0</div>
-                        <div style="font-size:.7rem;color:var(--muted);font-weight:600">منشور</div>
-                    </div>
-                    <div style="flex:1;padding:14px;text-align:center;border-left:1px solid var(--border)">
-                        <div id="profile-votes-count" style="font-size:1.4rem;font-weight:900">0</div>
-                        <div style="font-size:.7rem;color:var(--muted);font-weight:600">إعجاب</div>
-                    </div>
-                    <div style="flex:1;padding:14px;text-align:center">
-                        <div id="profile-rooms-count" style="font-size:1.4rem;font-weight:900">0</div>
-                        <div style="font-size:.7rem;color:var(--muted);font-weight:600">مجلس</div>
-                    </div>
-                </div>
-
-                <button onclick="handleLogout()" class="btn btn-ghost" style="margin-top:16px;width:100%;justify-content:center;color:#ef4444;border-color:#fecaca">
-                    <i class="fa-solid fa-right-from-bracket"></i> تسجيل الخروج
+        <!-- ════ PROFILE VIEW ════ -->
+        <section id="profile-view" class="hidden space-y-4 fade-in">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <button onclick="navigateTo('timeline')" class="text-xs text-blue-600 font-bold mb-4 flex items-center gap-1 hover:underline">
+                    <i class="fa-solid fa-arrow-right"></i> العودة للرئيسية
                 </button>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div class="flex items-center gap-4">
+                        <div class="w-16 h-16 bg-black text-white font-black text-2xl rounded-full flex items-center justify-center shadow-lg" id="profile-avatar">م</div>
+                        <div>
+                            <h2 id="profile-display-name" class="text-2xl font-black text-black">—</h2>
+                            <p id="profile-username" class="text-sm text-gray-500 mt-0.5">—</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="text-center bg-gray-50 border px-5 py-3 rounded-xl">
+                            <span class="block text-2xl font-black text-black" id="profile-posts-count">0</span>
+                            <span class="text-xs text-gray-500 font-bold">منشور</span>
+                        </div>
+                    </div>
+                </div>
             </div>
-
-            <!-- My posts -->
-            <div class="card" style="padding:20px">
-                <div class="section-label">منشوراتي</div>
-                <div id="profile-posts-list" style="display:flex;flex-direction:column;gap:10px"></div>
-            </div>
+            <div id="profile-posts-list" class="space-y-3"></div>
         </section>
-
     </main>
 </div>
-
-<!-- ══════ MOBILE NAV ══════ -->
-<nav class="mobile-nav" style="position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.97);backdrop-filter:blur(16px);border-top:1px solid var(--border);padding:8px 0 16px;display:flex;justify-content:space-around;z-index:100">
-    <button class="nav-item active" id="mob-nav-timeline" onclick="navigateTo('timeline')">
-        <i class="fa-solid fa-house"></i> الرئيسية
-    </button>
-    <button class="nav-item" id="mob-nav-rooms" onclick="navigateTo('rooms')">
-        <i class="fa-solid fa-tower-broadcast" style="color:var(--accent)"></i> مجالس
-    </button>
-    <button class="nav-item" id="mob-nav-explore" onclick="navigateTo('explore')">
-        <i class="fa-solid fa-compass"></i> اكتشف
-    </button>
-    <button class="nav-item" id="mob-nav-profile" onclick="navigateTo('profile')">
-        <i class="fa-solid fa-user"></i> أنا
-    </button>
-</nav>
 
 <script src="app.js"></script>
 </body>
