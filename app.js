@@ -1,10 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// Pulse Live — Frontend Engine v4.0
-// Schema: posts(id,author_id,author_name,title,content,upvotes,downvotes,created_at)
-//         audio_rooms(id,title,host_name,host_id,is_active,created_at)
-//         post_votes(id,post_id,user_id,vote_type)
-//         comments(id,post_id,author_name,content,created_at)
-//         profiles(id,first_name,last_name,avatar_url)
+// Pulse Live — Frontend Engine v4.0 (معدّل لتشخيص الأخطاء)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const SUPABASE_URL      = 'https://jnwqokkzywrctdjsdzbl.supabase.co';
@@ -14,7 +9,7 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // ── Global state ──
 let currentUser       = null;
 let allPostsCache     = [];
-let myVotesCache      = {};   // { post_id: 'upvote'|'downvote' }
+let myVotesCache      = {};
 let currentTab        = 'latest';
 let currentRoom       = null;
 let currentRoomId     = null;
@@ -60,34 +55,11 @@ function toast(msg, type='info') {
     el.style.background = type==='success'?'#16a34a':type==='error'?'#dc2626':'#0f0f0f';
     el.classList.remove('hidden');
     clearTimeout(el._t);
-    el._t = setTimeout(()=>el.classList.add('hidden'), 3500);
+    el._t = setTimeout(()=>el.classList.add('hidden'), 5000);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ROUTER
-// ══════════════════════════════════════════════════════════════════════════════
-const VIEWS = ['timeline','rooms','explore','profile'];
-
-function navigateTo(view) {
-    VIEWS.forEach(v => {
-        document.getElementById(v+'-view')?.classList.add('hidden');
-        document.getElementById('nav-'+v)?.classList.remove('active');
-        document.getElementById('mob-nav-'+v)?.classList.remove('active');
-    });
-    document.getElementById(view+'-view')?.classList.remove('hidden');
-    document.getElementById('nav-'+view)?.classList.add('active');
-    document.getElementById('mob-nav-'+view)?.classList.add('active');
-
-    if (view === 'rooms')   fetchRooms();
-    if (view === 'explore') renderExplorePage();
-    if (view === 'profile') {
-        if (!currentUser) { openAuthModal(); return; }
-        renderProfilePage();
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// AUTH
+// AUTH مع تحسين الجلسة
 // ══════════════════════════════════════════════════════════════════════════════
 function openAuthModal()  { document.getElementById('auth-modal').classList.remove('hidden'); }
 function closeAuthModal() { document.getElementById('auth-modal').classList.add('hidden'); }
@@ -110,11 +82,19 @@ async function handleLogin() {
     if (!email || !password) return toast('أدخل البريد وكلمة المرور', 'error');
     const btn = document.querySelector('#login-form .btn');
     if (btn) { btn.textContent='...'; btn.disabled=true; }
-    const { error } = await db.auth.signInWithPassword({ email, password });
+    const { data, error } = await db.auth.signInWithPassword({ email, password });
     if (btn) { btn.innerHTML='دخول <i class="fa-solid fa-arrow-left"></i>'; btn.disabled=false; }
-    if (error) return toast(error.message, 'error');
+    if (error) {
+        console.error('Login error:', error);
+        return toast(error.message, 'error');
+    }
+    console.log('Login success:', data.user);
+    currentUser = data.user;
+    updateUIForAuth();
     closeAuthModal();
     toast('أهلاً بك! 🎉', 'success');
+    await fetchPosts();
+    await fetchMyVotes();
 }
 
 async function handleSignup() {
@@ -125,27 +105,46 @@ async function handleSignup() {
     if (password.length<6) return toast('كلمة المرور 6 أحرف على الأقل','error');
     const btn = document.querySelector('#signup-form .btn');
     if (btn) { btn.textContent='...'; btn.disabled=true; }
-    const { error } = await db.auth.signUp({ email, password, options:{ data:{ full_name:name } } });
+    const { data, error } = await db.auth.signUp({ 
+        email, 
+        password, 
+        options: { data: { full_name: name } } 
+    });
     if (btn) { btn.innerHTML='إنشاء الحساب ✨'; btn.disabled=false; }
-    if (error) return toast(error.message,'error');
+    if (error) {
+        console.error('Signup error:', error);
+        return toast(error.message,'error');
+    }
+    console.log('Signup success:', data);
+    if (data.user) {
+        currentUser = data.user;
+        updateUIForAuth();
+    }
     closeAuthModal();
     toast('مرحباً بك في Pulse! 🎊','success');
+    await fetchPosts();
 }
 
 async function handleLogout() {
     await db.auth.signOut();
-    currentUser = null; myVotesCache = {};
+    currentUser = null;
+    myVotesCache = {};
     updateUIForAuth();
     navigateTo('timeline');
     toast('إلى اللقاء! 👋','info');
 }
 
 db.auth.onAuthStateChange(async (event, session) => {
+    console.log('Auth state change:', event, session?.user?.email);
     currentUser = session?.user ?? null;
     updateUIForAuth();
-    if (event==='SIGNED_IN') {
+    if (event === 'SIGNED_IN') {
         await fetchPosts();
         await fetchMyVotes();
+    }
+    if (event === 'SIGNED_OUT') {
+        allPostsCache = [];
+        renderTimeline();
     }
 });
 
@@ -178,7 +177,7 @@ function displayName() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// POSTS
+// POSTS (مع تشخيص أخطاء الإدراج)
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchPosts() {
     const { data, error } = await db
@@ -188,10 +187,10 @@ async function fetchPosts() {
         .limit(80);
 
     if (error) {
-        console.error('fetchPosts:', error);
+        console.error('fetchPosts error:', error);
         const c = document.getElementById('posts-container');
         if (c) c.innerHTML = `<div class="card" style="padding:28px;text-align:center;color:#ef4444;font-size:.85rem">
-            ⚠️ ${esc(error.message)}</div>`;
+            ⚠️ فشل تحميل المنشورات: ${esc(error.message)}</div>`;
         return;
     }
     allPostsCache = data || [];
@@ -201,19 +200,123 @@ async function fetchPosts() {
 
 async function fetchMyVotes() {
     if (!currentUser) return;
-    const { data } = await db
+    const { data, error } = await db
         .from('post_votes')
         .select('post_id,vote_type')
         .eq('user_id', currentUser.id);
+    if (error) console.error('fetchMyVotes error:', error);
     myVotesCache = {};
     (data||[]).forEach(v => { myVotesCache[v.post_id] = v.vote_type; });
-    renderTimeline();   // re-render to show voted state
+    renderTimeline();
+}
+
+async function createPost() {
+    if (!currentUser) {
+        toast('يجب تسجيل الدخول أولاً', 'error');
+        return openAuthModal();
+    }
+
+    const titleEl   = document.getElementById('post-title-input');
+    const contentEl = document.getElementById('post-textarea');
+    const title   = titleEl?.value?.trim() || '';
+    const content = contentEl?.value?.trim() || '';
+
+    if (!content) return toast('اكتب محتوى المنشور أولاً', 'error');
+
+    const btn = document.getElementById('post-submit-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '...'; }
+
+    const newPost = {
+        title:        title || content.slice(0,60),
+        content,
+        author_id:    currentUser.id,
+        author_name:  displayName(),
+        upvotes:      0,
+        downvotes:    0,
+    };
+
+    console.log('Inserting post:', newPost);
+
+    const { data, error } = await db.from('posts').insert(newPost).select();
+
+    if (btn) { btn.disabled = false; btn.innerHTML = 'نشر <i class="fa-solid fa-paper-plane"></i>'; }
+
+    if (error) {
+        console.error('Insert error:', error);
+        toast('فشل النشر: ' + error.message, 'error');
+        return;
+    }
+
+    console.log('Post inserted successfully:', data);
+    if (titleEl) titleEl.value = '';
+    if (contentEl) contentEl.value = '';
+    toast('تم النشر! ✅', 'success');
+    await fetchPosts();
+}
+
+async function handleVote(postId, voteType) {
+    if (!currentUser) return openAuthModal();
+
+    const post = allPostsCache.find(p => p.id === postId);
+    if (!post) return;
+    const current = myVotesCache[postId];
+
+    if (current === voteType) {
+        // إلغاء التصويت
+        const { error: delErr } = await db.from('post_votes')
+            .delete().eq('post_id', postId).eq('user_id', currentUser.id);
+        if (delErr) return toast('فشل إلغاء التصويت: '+delErr.message, 'error');
+
+        const field = voteType === 'upvote' ? 'upvotes' : 'downvotes';
+        const newVal = Math.max(0, (post[field]||0) - 1);
+        await db.from('posts').update({ [field]: newVal }).eq('id', postId);
+        post[field] = newVal;
+        delete myVotesCache[postId];
+    } else {
+        if (current) {
+            // تغيير التصويت
+            await db.from('post_votes')
+                .update({ vote_type: voteType })
+                .eq('post_id', postId).eq('user_id', currentUser.id);
+            const oldField = current === 'upvote' ? 'upvotes' : 'downvotes';
+            const newField = voteType === 'upvote' ? 'upvotes' : 'downvotes';
+            post[oldField] = Math.max(0, (post[oldField]||0) - 1);
+            post[newField] = (post[newField]||0) + 1;
+            await db.from('posts').update({
+                [oldField]: post[oldField],
+                [newField]: post[newField],
+            }).eq('id', postId);
+        } else {
+            // تصويت جديد
+            const { error: insErr } = await db.from('post_votes')
+                .insert({ post_id: postId, user_id: currentUser.id, vote_type: voteType });
+            if (insErr) return toast('فشل التصويت: '+insErr.message, 'error');
+            const field = voteType === 'upvote' ? 'upvotes' : 'downvotes';
+            post[field] = (post[field]||0) + 1;
+            await db.from('posts').update({ [field]: post[field] }).eq('id', postId);
+        }
+        myVotesCache[postId] = voteType;
+    }
+
+    renderTimeline();
+}
+
+async function deletePost(postId) {
+    if (!currentUser) return;
+    if (!confirm('حذف هذا المنشور؟')) return;
+    const { error } = await db.from('posts').delete()
+        .eq('id', postId).eq('author_id', currentUser.id);
+    if (error) return toast('فشل الحذف: '+error.message, 'error');
+    allPostsCache = allPostsCache.filter(p => p.id !== postId);
+    delete myVotesCache[postId];
+    renderTimeline();
+    toast('تم الحذف', 'info');
 }
 
 function switchTab(tab) {
     currentTab = tab;
     document.getElementById('tab-latest')?.classList.toggle('active', tab==='latest');
-    document.getElementById('tab-top')?.classList.toggle('active',    tab==='top');
+    document.getElementById('tab-top')?.classList.toggle('active', tab==='top');
     renderTimeline();
 }
 
@@ -279,95 +382,6 @@ function postCard(post) {
     </div>`;
 }
 
-async function createPost() {
-    if (!currentUser) return openAuthModal();
-    const titleEl   = document.getElementById('post-title-input');
-    const contentEl = document.getElementById('post-textarea');
-    const title   = titleEl?.value?.trim()   || '';
-    const content = contentEl?.value?.trim() || '';
-    if (!content) return toast('اكتب محتوى المنشور أولاً','error');
-
-    const btn = document.getElementById('post-submit-btn');
-    if (btn) { btn.disabled=true; btn.textContent='...'; }
-
-    const { error } = await db.from('posts').insert({
-        title:        title || content.slice(0,60),
-        content,
-        author_id:    currentUser.id,
-        author_name:  displayName(),
-        upvotes:      0,
-        downvotes:    0,
-    });
-
-    if (btn) { btn.disabled=false; btn.innerHTML='نشر <i class="fa-solid fa-paper-plane"></i>'; }
-    if (error) return toast('فشل النشر: '+error.message,'error');
-
-    if (titleEl)   titleEl.value   = '';
-    if (contentEl) contentEl.value = '';
-    toast('تم النشر! ✅','success');
-    await fetchPosts();
-}
-
-async function handleVote(postId, voteType) {
-    if (!currentUser) return openAuthModal();
-
-    const post    = allPostsCache.find(p => p.id === postId);
-    if (!post) return;
-    const current = myVotesCache[postId];
-
-    if (current === voteType) {
-        // إلغاء التصويت
-        const { error: delErr } = await db.from('post_votes')
-            .delete().eq('post_id', postId).eq('user_id', currentUser.id);
-        if (delErr) return toast('فشل إلغاء التصويت','error');
-
-        const field = voteType==='upvote' ? 'upvotes' : 'downvotes';
-        await db.from('posts').update({ [field]: Math.max(0,(post[field]||0)-1) }).eq('id', postId);
-        post[field] = Math.max(0,(post[field]||0)-1);
-        delete myVotesCache[postId];
-
-    } else {
-        // تصويت جديد أو تغيير
-        if (current) {
-            // غيّر التصويت
-            await db.from('post_votes')
-                .update({ vote_type: voteType })
-                .eq('post_id', postId).eq('user_id', currentUser.id);
-            const oldField = current==='upvote'   ? 'upvotes'   : 'downvotes';
-            const newField = voteType==='upvote'  ? 'upvotes'   : 'downvotes';
-            post[oldField] = Math.max(0,(post[oldField]||0)-1);
-            post[newField] = (post[newField]||0)+1;
-            await db.from('posts').update({
-                [oldField]: post[oldField],
-                [newField]: post[newField],
-            }).eq('id', postId);
-        } else {
-            // تصويت جديد
-            const { error: insErr } = await db.from('post_votes')
-                .insert({ post_id: postId, user_id: currentUser.id, vote_type: voteType });
-            if (insErr) return toast('فشل التصويت: '+insErr.message,'error');
-            const field = voteType==='upvote' ? 'upvotes' : 'downvotes';
-            post[field] = (post[field]||0)+1;
-            await db.from('posts').update({ [field]: post[field] }).eq('id', postId);
-        }
-        myVotesCache[postId] = voteType;
-    }
-
-    renderTimeline();
-}
-
-async function deletePost(postId) {
-    if (!currentUser) return;
-    if (!confirm('حذف هذا المنشور؟')) return;
-    const { error } = await db.from('posts').delete()
-        .eq('id', postId).eq('author_id', currentUser.id);
-    if (error) return toast('فشل الحذف: '+error.message,'error');
-    allPostsCache = allPostsCache.filter(p => p.id !== postId);
-    delete myVotesCache[postId];
-    renderTimeline();
-    toast('تم الحذف','info');
-}
-
 function filterByTag(tag) {
     navigateTo('timeline');
     currentTab = 'latest';
@@ -384,7 +398,7 @@ function filterByTag(tag) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// EXPLORE
+// EXPLORE, PROFILE, STATS (نفس السابق مع تحسينات بسيطة)
 // ══════════════════════════════════════════════════════════════════════════════
 function renderExplorePage() {
     const el = document.getElementById('explore-posts');
@@ -396,9 +410,6 @@ function renderExplorePage() {
         '<p style="color:var(--muted);font-size:.85rem;text-align:center;padding:20px">لا توجد منشورات بعد.</p>';
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// PROFILE
-// ══════════════════════════════════════════════════════════════════════════════
 function renderProfilePage() {
     if (!currentUser) return;
     const name    = displayName();
@@ -440,23 +451,21 @@ function renderProfilePage() {
         : '<p style="text-align:center;color:var(--muted);padding:24px 0;font-size:.88rem">لم تنشر شيئاً بعد 📝</p>';
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// STATS
-// ══════════════════════════════════════════════════════════════════════════════
 async function updateStats() {
     const postsEl = document.getElementById('stat-posts');
     const roomsEl = document.getElementById('stat-rooms');
     if (postsEl) postsEl.textContent = fmtNum(allPostsCache.length);
     if (roomsEl) {
-        const { count } = await db.from('audio_rooms')
+        const { count, error } = await db.from('audio_rooms')
             .select('id', { count:'exact', head:true })
             .eq('is_active', true);
+        if (error) console.error('updateStats rooms error:', error);
         roomsEl.textContent = fmtNum(count||0);
     }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// AUDIO ROOMS — CLUBHOUSE PREMIUM
+// AUDIO ROOMS (مع تشخيص)
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchRooms() {
     const { data, error } = await db
@@ -464,7 +473,7 @@ async function fetchRooms() {
         .select('id,title,host_name,host_id,is_active,created_at')
         .eq('is_active', true)
         .order('created_at', { ascending: false });
-    if (error) { console.error('fetchRooms:', error); return; }
+    if (error) { console.error('fetchRooms error:', error); return; }
     renderRooms(data||[]);
     updateStats();
 }
@@ -532,7 +541,6 @@ async function createNewAudioRoom() {
 
     const name = displayName();
 
-    // ✅ فقط الـ columns الموجودة في الـ schema
     const { data, error } = await db.from('audio_rooms').insert({
         title,
         host_id:   currentUser.id,
@@ -541,7 +549,10 @@ async function createNewAudioRoom() {
     }).select('id,title,host_id').single();
 
     if (btn) { btn.innerHTML='ابدأ الآن 🚀'; btn.disabled=false; }
-    if (error) return toast('فشل إنشاء الغرفة: '+error.message,'error');
+    if (error) {
+        console.error('Create room error:', error);
+        return toast('فشل إنشاء الغرفة: '+error.message,'error');
+    }
 
     if (input) input.value='';
     hideCreateRoomModal();
@@ -550,7 +561,6 @@ async function createNewAudioRoom() {
     if (data) joinRoom(data.id, data.title, data.host_id);
 }
 
-// ── Join Room ──
 async function joinRoom(roomId, title, hostId) {
     if (!currentUser) return openAuthModal();
     if (currentRoom) await leaveCurrentAudioRoom(true);
@@ -565,16 +575,18 @@ async function joinRoom(roomId, title, hostId) {
             body:    JSON.stringify({ roomName, participantName: userName }),
         });
         if (!res.ok) {
-            const d = await res.json().catch(()=>({}));
-            throw new Error(d.error || `HTTP ${res.status}`);
+            const text = await res.text();
+            console.error('Token fetch failed:', res.status, text);
+            throw new Error(`HTTP ${res.status}: ${text}`);
         }
         const { token, wsUrl } = await res.json();
+        if (!token || !wsUrl) throw new Error('Invalid token response');
 
         const room = new LivekitClient.Room({ adaptiveStream:true, dynacast:true });
 
         room.on(LivekitClient.RoomEvent.TrackSubscribed, track => {
             if (track.kind === LivekitClient.Track.Kind.Audio) {
-                track.attach().play().catch(()=>{});
+                track.attach().play().catch(e=>console.warn('Audio play error:', e));
             }
         });
 
@@ -607,7 +619,7 @@ async function joinRoom(roomId, title, hostId) {
         toast(`دخلت "${title}" 🎙️`,'success');
 
     } catch(err) {
-        console.error('joinRoom:', err);
+        console.error('joinRoom error:', err);
         toast('تعذر الانضمام: '+err.message,'error');
     }
 }
@@ -708,6 +720,29 @@ async function closeCurrentRoom() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ROUTER
+// ══════════════════════════════════════════════════════════════════════════════
+const VIEWS = ['timeline','rooms','explore','profile'];
+
+function navigateTo(view) {
+    VIEWS.forEach(v => {
+        document.getElementById(v+'-view')?.classList.add('hidden');
+        document.getElementById('nav-'+v)?.classList.remove('active');
+        document.getElementById('mob-nav-'+v)?.classList.remove('active');
+    });
+    document.getElementById(view+'-view')?.classList.remove('hidden');
+    document.getElementById('nav-'+view)?.classList.add('active');
+    document.getElementById('mob-nav-'+view)?.classList.add('active');
+
+    if (view === 'rooms')   fetchRooms();
+    if (view === 'explore') renderExplorePage();
+    if (view === 'profile') {
+        if (!currentUser) { openAuthModal(); return; }
+        renderProfilePage();
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // EXPORTS + BOOT
 // ══════════════════════════════════════════════════════════════════════════════
 Object.assign(window, {
@@ -720,8 +755,10 @@ Object.assign(window, {
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
+    console.log('App starting...');
     const { data:{ session } } = await db.auth.getSession();
     currentUser = session?.user ?? null;
+    console.log('Initial session user:', currentUser?.email);
     updateUIForAuth();
     await fetchPosts();
     if (currentUser) fetchMyVotes();
