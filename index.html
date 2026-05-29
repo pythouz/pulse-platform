@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pulse — منصة المجتمع الحي</title>
-    <!-- تم إزالة Tailwind CDN لأن المشروع لا يستخدمه والتحذير يؤثر على الأداء. يتم الاعتماد على الأنماط المخصصة أدناه فقط -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/livekit-client@1/dist/livekit-client.umd.js"></script>
@@ -497,12 +497,7 @@
             <div id="composer-logged-in" class="hidden card" style="padding:0">
                 <div style="display:flex;gap:12px;padding:18px 18px 0">
                     <div class="avatar av-sm" id="composer-avatar" style="background:var(--dark);margin-top:4px">م</div>
-                    <div style="flex:1;min-width:0">
-                        <input type="text" id="post-title-input" placeholder="عنوان المنشور (اختياري)..."
-                            style="width:100%;border:none;outline:none;font-size:.85rem;font-weight:700;color:var(--dark);background:transparent;font-family:inherit;margin-bottom:6px;padding:0"
-                            onkeydown="if(event.key==='Enter'){ event.preventDefault(); document.getElementById('post-textarea').focus(); }">
-                        <textarea id="post-textarea" placeholder="شاركنا ما يدور في ذهنك..."></textarea>
-                    </div>
+                    <textarea id="post-textarea" placeholder="شاركنا ما يدور في ذهنك..."></textarea>
                 </div>
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 18px 14px;border-top:1px solid var(--border);margin-top:10px">
                     <div style="display:flex;gap:8px">
