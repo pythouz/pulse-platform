@@ -271,6 +271,7 @@ function postCard(post, isTopPost = false) {
 async function handleVote(postId, type) {
     if (!currentUser) { openAuthModal(); return; }
 
+    postId = Number(postId); // data-id دايماً string من getAttribute، الكاش يخزنه number
     const voteType = type === 'up' ? 'upvote' : 'downvote';
     const post     = allPostsCache.find(p => p.id === postId);
     if (!post) return;
