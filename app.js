@@ -74,7 +74,6 @@ function navigateTo(view) {
     const target = document.getElementById(view+'-view');
     if (target) target.classList.remove('hidden');
 
-    // update nav active state — desktop
     VIEWS.forEach(v => {
         const btn    = document.getElementById('nav-'+v);
         const mobBtn = document.getElementById('mob-nav-'+v);
@@ -238,7 +237,7 @@ function postCard(post) {
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                         <span style="font-weight:800;font-size:.88rem;color:var(--dark)">${esc(name)}</span>
-                        ${post.is_verified ? '<span style="color:#3b82f6;font-size:.75rem" title="موثّق">✓</span>' : ''}
+                        <!-- تم إزالة is_verified لأنه غير موجود في قاعدة البيانات -->
                         <span style="font-size:.72rem;color:var(--muted)">${fmtDate(post.created_at)}</span>
                     </div>
                     ${isOwner ? `<button onclick="deletePost('${post.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;padding:4px 6px;border-radius:8px" title="حذف"><i class="fa-regular fa-trash-can"></i></button>` : ''}
@@ -386,10 +385,10 @@ async function updateStats() {
     const roomsEl = document.getElementById('stat-rooms');
     if (postsEl) postsEl.textContent = fmtNum(allPostsCache.length);
     if (roomsEl) {
-        const { count } = await db.from('audio_rooms')
+        const { count, error } = await db.from('audio_rooms')
             .select('id', { count:'exact', head:true })
             .eq('is_active', true);
-        roomsEl.textContent = fmtNum(count || 0);
+        if (!error) roomsEl.textContent = fmtNum(count || 0);
     }
 }
 
@@ -450,7 +449,6 @@ function renderRooms(rooms) {
     }).join('');
 }
 
-// ── Create Room Modal ──
 function showCreateRoomModal() {
     if (!currentUser) { openAuthModal(); return; }
     document.getElementById('create-room-modal').classList.remove('hidden');
@@ -474,7 +472,6 @@ async function createNewAudioRoom() {
 
     const name = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مضيف';
 
-    // ✅ Only send columns that exist in the schema
     const { data, error } = await db.from('audio_rooms').insert({
         title,
         host_id:   currentUser.id,
@@ -492,7 +489,6 @@ async function createNewAudioRoom() {
     if (data) joinRoom(data.id, data.title, data.host_id);
 }
 
-// ── Join Room ──
 async function joinRoom(roomId, title, hostId) {
     if (!currentUser) return openAuthModal();
     if (currentRoom) await leaveCurrentAudioRoom(true);
@@ -531,7 +527,7 @@ async function joinRoom(roomId, title, hostId) {
         await room.connect(wsUrl, token);
 
         try {
-            await room.localParticipant.setMicrophoneEnabled(false); // start muted
+            await room.localParticipant.setMicrophoneEnabled(false);
         } catch(e) { console.warn('mic:', e); }
 
         currentRoom       = room;
@@ -539,7 +535,6 @@ async function joinRoom(roomId, title, hostId) {
         currentRoomHostId = hostId;
         isCurrentUserHost = currentUser.id === hostId;
 
-        // Show panel
         const panel = document.getElementById('active-room-panel');
         panel.classList.remove('hidden');
         document.body.style.overflow = 'hidden';
@@ -577,7 +572,6 @@ function refreshRoomUI(room) {
         ...remotes.map(p => mkParticipant(p.identity, p.isMicrophoneEnabled, false)),
     ];
 
-    // First 8 → stage (speakers). Rest → audience
     const stageMax = Math.min(8, all.length);
     const stage    = all.slice(0, stageMax);
     const audience = all.slice(stageMax);
@@ -605,7 +599,6 @@ function refreshRoomUI(room) {
         : '<span style="font-size:.78rem;color:rgba(255,255,255,.3)">الجمهور فارغ بعد</span>';
 }
 
-// ── Mic ──
 function updateMicBtn() {
     if (!currentRoom) return;
     const btn = document.getElementById('mute-btn');
@@ -628,7 +621,6 @@ async function toggleMic() {
     } catch(e) { toast('تعذر التحكم في الميكروفون', 'error'); }
 }
 
-// ── Raise hand ──
 function raiseHand() {
     const btn = document.getElementById('raise-hand-btn');
     if (!btn) return;
@@ -636,7 +628,6 @@ function raiseHand() {
     toast(raised ? '✋ رفعت يدك' : 'أنزلت يدك', 'info');
 }
 
-// ── Leave ──
 async function leaveCurrentAudioRoom(silent = false) {
     if (currentRoom) {
         try { currentRoom.disconnect(); } catch(e) {}
@@ -689,8 +680,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateUIForAuth();
     fetchPosts();
 
-    document.getElementById('post-submit-btn')
-        ?.addEventListener('click', createPost);
+    // ربط حدث النشر مرة واحدة فقط (لا يوجد onclick في HTML)
+    const postBtn = document.getElementById('post-submit-btn');
+    if (postBtn) postBtn.addEventListener('click', createPost);
 
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
