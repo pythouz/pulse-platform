@@ -71,7 +71,7 @@
         /* ── Post Card ── */
         .post-card { padding:20px; }
         .post-card + .post-card { border-top:1px solid var(--border); }
-        .reaction-btn {
+        .reaction-btn { 
             display:flex; align-items:center; gap:5px;
             padding:5px 12px; border-radius:20px; border:1.5px solid var(--border);
             font-size:.75rem; font-weight:700; cursor:pointer;
@@ -80,6 +80,9 @@
         .reaction-btn:hover { border-color:var(--accent); color:var(--accent); background:#fff3f0; }
         .reaction-btn.liked { background:#fff3f0; border-color:var(--accent); color:var(--accent); }
         .reaction-btn.disliked { background:#fef2f2; border-color:#ef4444; color:#ef4444; }
+        .vote-up.voted   { background:#f0fdf4; border-color:#22c55e; color:#16a34a; font-weight:900; }
+        .vote-down.voted { background:#fef2f2; border-color:#ef4444; color:#ef4444; font-weight:900; }
+        .vote-up.voted i, .vote-down.voted i { filter: drop-shadow(0 0 3px currentColor); }
 
         /* ── Avatar ── */
         .avatar {
