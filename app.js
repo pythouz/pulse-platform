@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// Pulse — Frontend Engine v4.0 (تصويت سريع + ترتيب ديناميكي + تأثيرات ذهبية)
+// Pulse — Frontend Engine v4.1 (تصويت فوري + ترتيب ديناميكي + تاج ذهبي بجانب الاسم)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const SUPABASE_URL      = 'https://jnwqokkzywrctdjsdzbl.supabase.co';
@@ -62,7 +62,7 @@ function avatar(name, size='av-sm', extra='') {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ROUTER (نفس السابق)
+// ROUTER
 // ══════════════════════════════════════════════════════════════════════════════
 const VIEWS = ['timeline','rooms','explore','profile'];
 
@@ -87,7 +87,7 @@ function navigateTo(view) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// AUTH (نفس السابق)
+// AUTH
 // ══════════════════════════════════════════════════════════════════════════════
 function openAuthModal() {
     document.getElementById('auth-modal').classList.remove('hidden');
@@ -177,7 +177,7 @@ function updateUIForAuth() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// POSTS – الإصدار الجديد مع تصويت فوري وترتيب ذهبي
+// POSTS – الإصدار النهائي مع التاج بجانب الاسم والتصويت الفوري
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function fetchPosts() {
@@ -195,7 +195,7 @@ function switchTab(tab) {
     currentTab = tab;
     document.getElementById('tab-latest')?.classList.toggle('active', tab==='latest');
     document.getElementById('tab-top')?.classList.toggle('active',    tab==='top');
-    renderTimeline(); // يعيد ترتيب المنشورات حسب التبويب
+    renderTimeline();
 }
 
 function getSortedPosts() {
@@ -216,15 +216,17 @@ function renderTimeline() {
             <div style="font-size:2.5rem;margin-bottom:12px">📭</div>
             <p style="color:var(--muted);font-size:.9rem">لا توجد منشورات بعد.<br>كن أول من يشارك!</p>
         </div>`;
+        bindVoteEvents(); // لا حاجة لكن للأمان
         return;
     }
-    // حفظ موضع التمرير قبل إعادة الرندر
     scrollY = window.scrollY;
-    container.innerHTML = posts.map((post, idx) => postCard(post, idx === 0 && currentTab === 'top')).join('');
+    // نمرر `true` فقط للمنشور الأول إذا كان التبويب 'top'
+    container.innerHTML = posts.map((post, idx) => postCard(post, currentTab === 'top' && idx === 0)).join('');
     window.scrollTo(0, scrollY);
+    bindVoteEvents(); // إعادة ربط أزرار التصويت بعد الرندر
 }
 
-// دالة بطاقة المنشور مع إمكانية إضافة تأثير ذهبي لأعلى منشور (إذا كان top)
+// دالة بطاقة المنشور - التاج الآن بجانب الاسم داخل نفس الصف
 function postCard(post, isTopPost = false) {
     const name    = post.author_name || 'مجهول';
     const net     = (post.upvotes||0) - (post.downvotes||0);
@@ -233,19 +235,19 @@ function postCard(post, isTopPost = false) {
     const content = esc(post.content).replace(/#(\S+)/g,
         '<span style="color:var(--accent2);cursor:pointer;font-weight:700" onclick="filterByTag(\'$1\')">#$1</span>');
 
-    // كلاس إضافي للتأثير الذهبي
+    // إضافة كلاس ذهبي وتأثير للبطاقة إذا كانت الأعلى تقييماً
     const topClass = isTopPost ? 'golden-post' : '';
-    // إضافة تاج ذهبي في الأعلى
-    const crownHtml = isTopPost ? `<div class="golden-crown">👑</div>` : '';
+    // التاج أصبح داخل صف الاسم وليس منفصلاً
+    const crownHtml = isTopPost ? '<span style="font-size:1rem; margin-right:4px;">👑</span>' : '';
 
-    return `<div class="card post-card fade-up ${topClass}" data-id="${post.id}" style="position:relative; overflow:visible; ${isTopPost ? 'border:2px solid #FFD700; box-shadow:0 0 20px rgba(255,215,0,0.5);' : ''}">
-        ${crownHtml}
+    return `<div class="card post-card fade-up ${topClass}" data-id="${post.id}" style="position:relative; ${isTopPost ? 'border:2px solid #FFD700; box-shadow:0 0 20px rgba(255,215,0,0.5);' : ''}">
         <div style="display:flex;gap:12px">
             ${avatar(name, 'av-sm')}
             <div style="flex:1;min-width:0">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
                         <span style="font-weight:800;font-size:.88rem;color:var(--dark)">${esc(name)}</span>
+                        ${crownHtml}
                         <span style="font-size:.72rem;color:var(--muted)">${fmtDate(post.created_at)}</span>
                     </div>
                     ${isOwner ? `<button onclick="deletePost('${post.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;padding:4px 6px;border-radius:8px" title="حذف"><i class="fa-regular fa-trash-can"></i></button>` : ''}
@@ -265,70 +267,56 @@ function postCard(post, isTopPost = false) {
     </div>`;
 }
 
-// ── التصويت الجديد: يعمل فورياً دون إعادة تحميل الصفحة، ويحدث الـ DOM محلياً ──
+// ── التصويت: تحديث واجهة فوري + إرسال إلى السيرفر + إعادة ترتيب إذا كان تبويب top ──
 async function handleVote(postId, type) {
     if (!currentUser) { openAuthModal(); return; }
-    
-    // منع السلوك الافتراضي للأزرار
-    event?.preventDefault();
     
     const field = type === 'up' ? 'upvotes' : 'downvotes';
     const post = allPostsCache.find(p => p.id === postId);
     if (!post) return;
 
-    // تحديث واجهة المستخدم فوراً (optimistic update)
+    // optimistic update
     const oldValue = post[field] || 0;
     post[field] = oldValue + 1;
-    
     // تحديث الكاش
     const index = allPostsCache.findIndex(p => p.id === postId);
     if (index !== -1) allPostsCache[index] = post;
-    
-    // تحديث العداد في DOM مباشرة (بدون إعادة رندر كامل)
+
+    // تحديث DOM مباشرة
     const postElement = document.querySelector(`.post-card[data-id="${postId}"]`);
     if (postElement) {
         const upSpan = postElement.querySelector('.up-count');
         const downSpan = postElement.querySelector('.down-count');
         if (type === 'up' && upSpan) upSpan.innerText = fmtNum(post.upvotes);
         if (type === 'down' && downSpan) downSpan.innerText = fmtNum(post.downvotes);
-        // تحديث صافي التقييم
         const netSpan = postElement.querySelector('.net-score');
         const net = (post.upvotes||0) - (post.downvotes||0);
-        const netSign = net >= 0 ? '+' : '';
-        if (netSpan) netSpan.innerText = `${netSign}${net}`;
+        netSpan.innerText = `${net >= 0 ? '+' : ''}${net}`;
     }
-    
-    // إذا كان التبويب "top"، قد يتغير ترتيب المنشورات – نعيد الترتيب بعد التحديث من السيرفر
-    // لكن ننتظر نجاح العملية من السيرفر، ثم نعيد الترتيب إذا لزم الأمر
-    
-    // إرسال التحديث إلى السيرفر في الخلفية
+
+    // إرسال إلى السيرفر
     try {
         const { error } = await db.from('posts').update({ [field]: post[field] }).eq('id', postId);
         if (error) {
-            // فشل السيرفر: نعيد القيمة القديمة ونخبر المستخدم
+            // فشل: نعيد القيمة القديمة
             post[field] = oldValue;
             if (index !== -1) allPostsCache[index] = post;
             if (postElement) {
                 if (type === 'up') postElement.querySelector('.up-count').innerText = fmtNum(oldValue);
                 else postElement.querySelector('.down-count').innerText = fmtNum(oldValue);
                 const net = (post.upvotes||0) - (post.downvotes||0);
-                const netSign = net >= 0 ? '+' : '';
-                postElement.querySelector('.net-score').innerText = `${netSign}${net}`;
+                postElement.querySelector('.net-score').innerText = `${net >= 0 ? '+' : ''}${net}`;
             }
             toast('فشل التصويت: ' + error.message, 'error');
             return;
         }
-        // نجاح: إذا كنا في تبويب top، قد نحتاج إلى إعادة الترتيب
+        // نجاح: إذا كنا في تبويب top، قد نحتاج لإعادة الترتيب
         if (currentTab === 'top') {
-            // نعيد ترتيب الـ cache ونعرض القائمة مرة أخرى (مع الحفاظ على موضع التمرير)
-            const sorted = getSortedPosts();
-            // نتحقق إذا تغير ترتيب أول عنصر (المنشور الذهبي)
-            const container = document.getElementById('posts-container');
-            if (container && JSON.stringify(sorted.map(p=>p.id)) !== JSON.stringify(getSortedPosts().map(p=>p.id))) {
-                renderTimeline(); // يعيد الرندر مع الحفاظ على scrollY
-            } else {
-                // فقط نحدث التاج إذا لزم الأمر
-                highlightTopPostIfNeeded();
+            const newSorted = getSortedPosts();
+            // إذا تغير الترتيب (أول عنصر مختلف)
+            const firstId = document.querySelector('.post-card')?.getAttribute('data-id');
+            if (firstId && newSorted[0]?.id != firstId) {
+                renderTimeline();
             }
         }
         toast(`تم التصويت ${type === 'up' ? '⬆️' : '⬇️'}`, 'success');
@@ -338,33 +326,24 @@ async function handleVote(postId, type) {
     }
 }
 
-// مساعد لإبراز المنشور الأعلى تصويتاً (في حالة top)
-function highlightTopPostIfNeeded() {
-    if (currentTab !== 'top') return;
-    const container = document.getElementById('posts-container');
-    if (!container) return;
-    const firstCard = container.querySelector('.post-card');
-    if (firstCard && !firstCard.classList.contains('golden-post')) {
-        // لو أول بطاقة ليس لها تاج، نعيد الرندر
-        renderTimeline();
-    }
-}
-
-// ربط التصويت باستخدام event delegation (لتجنب مشكلة الأزرار المضافة ديناميكياً)
+// ── Event delegation لأزرار التصويت (تعمل حتى بعد إعادة الرندر) ──
 function bindVoteEvents() {
     const container = document.getElementById('posts-container');
     if (!container) return;
-    container.addEventListener('click', (e) => {
-        const btn = e.target.closest('.vote-up, .vote-down');
-        if (!btn) return;
-        e.preventDefault();
-        const postId = btn.getAttribute('data-id');
-        const type = btn.classList.contains('vote-up') ? 'up' : 'down';
-        if (postId) handleVote(postId, type);
-    });
+    // إزالة المستمع القديم لتجنب التكرار
+    container.removeEventListener('click', voteClickHandler);
+    container.addEventListener('click', voteClickHandler);
 }
 
-// باقي دوال المنشورات (createPost, deletePost, filterByTag) كما هي مع تعديل بسيط:
+function voteClickHandler(event) {
+    const btn = event.target.closest('.vote-up, .vote-down');
+    if (!btn) return;
+    event.preventDefault();
+    const postId = btn.getAttribute('data-id');
+    const type = btn.classList.contains('vote-up') ? 'up' : 'down';
+    if (postId) handleVote(postId, type);
+}
+
 async function createPost() {
     if (!currentUser) return openAuthModal();
     const ta      = document.getElementById('post-textarea');
@@ -405,14 +384,14 @@ function filterByTag(tag) {
     if (!container) return;
     if (!filtered.length) {
         container.innerHTML = `<div class="card" style="padding:32px;text-align:center;color:var(--muted)">لا توجد منشورات بوسم #${esc(tag)}</div>`;
-        return;
+    } else {
+        container.innerHTML = filtered.map(post => postCard(post, false)).join('');
     }
-    container.innerHTML = filtered.map(post => postCard(post, false)).join('');
-    bindVoteEvents(); // إعادة ربط الأحداث بعد التصفية
+    bindVoteEvents();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// EXPLORE (يستخدم نفس postCard مع isTopPost = false)
+// EXPLORE
 // ══════════════════════════════════════════════════════════════════════════════
 function renderExplorePage() {
     const el = document.getElementById('explore-posts');
@@ -422,15 +401,16 @@ function renderExplorePage() {
         .slice(0, 10);
     if (!top.length) {
         el.innerHTML = '<p style="color:var(--muted);font-size:.85rem">لا توجد منشورات بعد.</p>';
+        bindVoteEvents();
         return;
     }
-    // في صفحة الاستكشاف، نضع تاجاً على أول منشور (أعلى تقييماً)
+    // أول منشور في قائمة الاستكشاف يحصل على تاج (لأنه الأعلى تقييماً)
     el.innerHTML = top.map((post, idx) => postCard(post, idx === 0)).join('');
-    bindVoteEvents(); // ربط أحداث التصويت في الصفحة
+    bindVoteEvents();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// PROFILE (نفس السابق)
+// PROFILE
 // ══════════════════════════════════════════════════════════════════════════════
 function renderProfilePage() {
     if (!currentUser) return;
@@ -493,7 +473,7 @@ async function updateStats() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// AUDIO ROOMS (نفس السابق، مع إضافة bindVoteEvents عند التحميل لا حاجة)
+// AUDIO ROOMS (نفس السابق مع إعادة ربط لا حاجة لها هنا)
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchRooms() {
     const { data, error } = await db.from('audio_rooms')
@@ -505,7 +485,7 @@ async function fetchRooms() {
     updateStats();
 }
 
-function renderRooms(rooms) { /* نفس السابق */ 
+function renderRooms(rooms) {
     const grid  = document.getElementById('rooms-grid');
     const empty = document.getElementById('rooms-empty-state');
     if (!grid) return;
@@ -589,20 +569,30 @@ async function createNewAudioRoom() {
     if (data) joinRoom(data.id, data.title, data.host_id);
 }
 
-async function joinRoom(roomId, title, hostId) { /* نفس السابق */ 
+async function joinRoom(roomId, title, hostId) {
     if (!currentUser) return openAuthModal();
     if (currentRoom) await leaveCurrentAudioRoom(true);
+
     const userName = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
     const roomName = `room_${roomId}`;
+
     try {
         const res = await fetch('/api/livekit-token', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({ roomName, participantName: userName }),
         });
-        if (!res.ok) throw new Error('فشل الحصول على token');
+        if (!res.ok) {
+            const d = await res.json().catch(()=>({}));
+            throw new Error(d.error || `HTTP ${res.status}`);
+        }
         const { token, wsUrl } = await res.json();
-        const room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
+
+        const room = new LivekitClient.Room({
+            adaptiveStream:  true,
+            dynacast:        true,
+        });
+
         room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
             if (track.kind === LivekitClient.Track.Kind.Audio) {
                 const audio = track.attach();
@@ -613,23 +603,35 @@ async function joinRoom(roomId, title, hostId) { /* نفس السابق */
         room.on(LivekitClient.RoomEvent.ParticipantDisconnected, () => refreshRoomUI(room));
         room.on(LivekitClient.RoomEvent.TrackMuted,              () => refreshRoomUI(room));
         room.on(LivekitClient.RoomEvent.TrackUnmuted,            () => refreshRoomUI(room));
+
         await room.connect(wsUrl, token);
-        await room.localParticipant.setMicrophoneEnabled(false);
+
+        try {
+            await room.localParticipant.setMicrophoneEnabled(false);
+        } catch(e) { console.warn('mic:', e); }
+
         currentRoom       = room;
         currentRoomId     = roomId;
         currentRoomHostId = hostId;
         isCurrentUserHost = currentUser.id === hostId;
+
         const panel = document.getElementById('active-room-panel');
         panel.classList.remove('hidden');
         document.body.style.overflow = 'hidden';
+
         document.getElementById('active-room-title').textContent = title;
-        document.getElementById('active-room-role').textContent  = isCurrentUserHost ? 'أنت المضيف 👑' : 'مستمع في الجمهور';
+        document.getElementById('active-room-role').textContent  =
+            isCurrentUserHost ? 'أنت المضيف 👑' : 'مستمع في الجمهور';
+
         const closeBtn = document.getElementById('close-active-room-btn');
         if (closeBtn) closeBtn.style.display = isCurrentUserHost ? 'inline-flex' : 'none';
+
         updateMicBtn();
         refreshRoomUI(room);
+
         window.addEventListener('beforeunload', quietLeave);
         toast(`دخلت "${title}" 🎙️`, 'success');
+
     } catch(err) {
         console.error('joinRoom:', err);
         toast('تعذر الانضمام: ' + err.message, 'error');
@@ -640,16 +642,20 @@ function refreshRoomUI(room) {
     const speakersEl  = document.getElementById('speakers-grid');
     const listenersEl = document.getElementById('listeners-grid');
     if (!speakersEl || !listenersEl) return;
+
     const local   = room.localParticipant;
     const remotes = Array.from(room.remoteParticipants?.values() || room.participants?.values() || []);
+
     const mkParticipant = (identity, isMicOn, isLocal) => ({ identity, isMicOn, isLocal });
     const all = [
         mkParticipant(local.identity, local.isMicrophoneEnabled, true),
         ...remotes.map(p => mkParticipant(p.identity, p.isMicrophoneEnabled, false)),
     ];
+
     const stageMax = Math.min(8, all.length);
     const stage    = all.slice(0, stageMax);
     const audience = all.slice(stageMax);
+
     speakersEl.innerHTML = stage.map(p => {
         const c    = getColor(p.identity);
         const init = getInitial(p.identity);
@@ -667,6 +673,7 @@ function refreshRoomUI(room) {
             ${p.isLocal && isCurrentUserHost ? '<div style="font-size:.6rem;color:#f59e0b;font-weight:800">مضيف 👑</div>' : ''}
         </div>`;
     }).join('');
+
     listenersEl.innerHTML = audience.length
         ? audience.map(p => `<div class="listener-bubble" style="background:${getColor(p.identity)}" title="${esc(p.identity)}">${getInitial(p.identity)}</div>`).join('')
         : '<span style="font-size:.78rem;color:rgba(255,255,255,.3)">الجمهور فارغ بعد</span>';
@@ -678,8 +685,11 @@ function updateMicBtn() {
     if (!btn) return;
     const isOn = currentRoom.localParticipant.isMicrophoneEnabled;
     btn.classList.toggle('active', isOn);
-    btn.innerHTML = isOn ? '<i class="fa-solid fa-microphone"></i>' : '<i class="fa-solid fa-microphone-slash"></i>';
+    btn.innerHTML = isOn
+        ? '<i class="fa-solid fa-microphone"></i>'
+        : '<i class="fa-solid fa-microphone-slash"></i>';
 }
+
 async function toggleMic() {
     if (!currentRoom) return;
     try {
@@ -690,12 +700,14 @@ async function toggleMic() {
         toast(next ? '🎙️ الميكروفون شغّال' : '🔇 الميكروفون معطّل', 'info');
     } catch(e) { toast('تعذر التحكم في الميكروفون', 'error'); }
 }
+
 function raiseHand() {
     const btn = document.getElementById('raise-hand-btn');
     if (!btn) return;
     const raised = btn.classList.toggle('raised');
     toast(raised ? '✋ رفعت يدك' : 'أنزلت يدك', 'info');
 }
+
 async function leaveCurrentAudioRoom(silent = false) {
     if (currentRoom) {
         try { currentRoom.disconnect(); } catch(e) {}
@@ -712,17 +724,23 @@ async function leaveCurrentAudioRoom(silent = false) {
     if (!silent) toast('غادرت المجلس 👋', 'info');
     fetchRooms();
 }
-function quietLeave() { if (currentRoom) try { currentRoom.disconnect(); } catch(e) {} }
+
+function quietLeave() {
+    if (currentRoom) try { currentRoom.disconnect(); } catch(e) {}
+}
+
 async function closeCurrentRoom() {
     if (!currentRoomId || !isCurrentUserHost) return;
     if (!confirm('إغلاق الغرفة نهائياً؟')) return;
-    const { error } = await db.from('audio_rooms').update({ is_active: false }).eq('id', currentRoomId);
+    const { error } = await db.from('audio_rooms')
+        .update({ is_active: false })
+        .eq('id', currentRoomId);
     if (error) return toast('فشل الإغلاق: ' + error.message, 'error');
     await leaveCurrentAudioRoom();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// GLOBAL EXPORTS + BOOT
+// GLOBAL EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
 Object.assign(window, {
     navigateTo, openAuthModal, closeAuthModal, outsideCloseAuth,
@@ -731,23 +749,25 @@ Object.assign(window, {
     fetchRooms, showCreateRoomModal, hideCreateRoomModal, outsideCloseRoom,
     createNewAudioRoom, joinRoom, leaveCurrentAudioRoom, closeCurrentRoom,
     toggleMic, raiseHand,
-    // نكشف handleVote أيضاً في حال احتياج مباشر (ليس ضرورياً لأننا نستخدم event delegation)
-    handleVote,
+    handleVote, // للاستخدام المباشر إن لزم
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// BOOT
+// ══════════════════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
     const { data: { session } } = await db.auth.getSession();
     currentUser = session?.user ?? null;
     updateUIForAuth();
     fetchPosts();
-    
-    // ربط حدث النشر (بدون onclick مزدوج)
+
+    // ربط زر النشر (بدون onclick في HTML)
     const postBtn = document.getElementById('post-submit-btn');
     if (postBtn) postBtn.addEventListener('click', createPost);
-    
-    // ربط أحداث التصويت ديناميكياً (delegation)
+
+    // ربط أحداث التصويت
     bindVoteEvents();
-    
+
     // التعامل مع زر Esc
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
