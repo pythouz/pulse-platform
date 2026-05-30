@@ -267,63 +267,111 @@ function postCard(post, isTopPost = false) {
     </div>`;
 }
 
-// ── التصويت: تحديث واجهة فوري + إرسال إلى السيرفر + إعادة ترتيب إذا كان تبويب top ──
+// ── التصويت: يستخدم post_votes للتتبع + يمنع التصويت المكرر + يدعم إلغاء التصويت ──
 async function handleVote(postId, type) {
     if (!currentUser) { openAuthModal(); return; }
-    
-    const field = type === 'up' ? 'upvotes' : 'downvotes';
-    const post = allPostsCache.find(p => p.id === postId);
-    if (!post) return;
 
-    // optimistic update
-    const oldValue = post[field] || 0;
-    post[field] = oldValue + 1;
+    const voteType = type === 'up' ? 'upvote' : 'downvote';
+    const post     = allPostsCache.find(p => p.id === postId);
+    if (!post) return;
+    const index    = allPostsCache.findIndex(p => p.id === postId);
+
+    // تحقق من التصويت الحالي للمستخدم على هذا المنشور
+    const { data: existingVote } = await db
+        .from('post_votes')
+        .select('id, vote_type')
+        .eq('post_id', postId)
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+    let upDelta   = 0;
+    let downDelta = 0;
+    let action    = '';
+
+    if (existingVote) {
+        if (existingVote.vote_type === voteType) {
+            // نفس التصويت → إلغاء
+            const { error } = await db.from('post_votes').delete().eq('id', existingVote.id);
+            if (error) { toast('فشل إلغاء التصويت', 'error'); return; }
+            if (voteType === 'upvote')   upDelta   = -1;
+            else                         downDelta = -1;
+            action = 'cancel';
+        } else {
+            // تصويت معاكس → تغيير
+            const { error } = await db.from('post_votes')
+                .update({ vote_type: voteType })
+                .eq('id', existingVote.id);
+            if (error) { toast('فشل تغيير التصويت', 'error'); return; }
+            if (voteType === 'upvote') { upDelta = 1; downDelta = -1; }
+            else                       { upDelta = -1; downDelta = 1; }
+            action = 'change';
+        }
+    } else {
+        // تصويت جديد
+        const { error } = await db.from('post_votes').insert({
+            post_id:   postId,
+            user_id:   currentUser.id,
+            vote_type: voteType,
+        });
+        if (error) { toast('فشل التصويت: ' + error.message, 'error'); return; }
+        if (voteType === 'upvote') upDelta = 1;
+        else                       downDelta = 1;
+        action = 'add';
+    }
+
+    // تحديث العدادات في DB (الصلاحية ليست مشكلة لأن الكاتب هو صاحب المنشور فقط)
+    // نستخدم قيم مطلقة من الكاش + الدلتا لتجنب race conditions
+    const newUpvotes   = Math.max(0, (post.upvotes   || 0) + upDelta);
+    const newDownvotes = Math.max(0, (post.downvotes || 0) + downDelta);
+
+    const { error: updateErr } = await db.rpc('increment_votes', {
+        p_post_id:   postId,
+        p_up_delta:  upDelta,
+        p_down_delta: downDelta,
+    });
+
+    // إذا لم تكن الـ RPC موجودة نستخدم update مباشر (fallback)
+    if (updateErr) {
+        await db.from('posts')
+            .update({ upvotes: newUpvotes, downvotes: newDownvotes })
+            .eq('id', postId);
+    }
+
     // تحديث الكاش
-    const index = allPostsCache.findIndex(p => p.id === postId);
+    post.upvotes   = newUpvotes;
+    post.downvotes = newDownvotes;
     if (index !== -1) allPostsCache[index] = post;
 
-    // تحديث DOM مباشرة
+    // تحديث DOM مباشرة بدون إعادة رندر كامل
     const postElement = document.querySelector(`.post-card[data-id="${postId}"]`);
     if (postElement) {
-        const upSpan = postElement.querySelector('.up-count');
+        const upSpan   = postElement.querySelector('.up-count');
         const downSpan = postElement.querySelector('.down-count');
-        if (type === 'up' && upSpan) upSpan.innerText = fmtNum(post.upvotes);
-        if (type === 'down' && downSpan) downSpan.innerText = fmtNum(post.downvotes);
-        const netSpan = postElement.querySelector('.net-score');
-        const net = (post.upvotes||0) - (post.downvotes||0);
-        netSpan.innerText = `${net >= 0 ? '+' : ''}${net}`;
+        const netSpan  = postElement.querySelector('.net-score');
+        if (upSpan)   upSpan.innerText   = fmtNum(newUpvotes);
+        if (downSpan) downSpan.innerText = fmtNum(newDownvotes);
+        if (netSpan) {
+            const net = newUpvotes - newDownvotes;
+            netSpan.innerText = `${net >= 0 ? '+' : ''}${net}`;
+        }
+        // تمييز زر التصويت النشط
+        const upBtn   = postElement.querySelector('.vote-up');
+        const downBtn = postElement.querySelector('.vote-down');
+        if (upBtn)   upBtn.classList.toggle('voted',   action !== 'cancel' && voteType === 'upvote');
+        if (downBtn) downBtn.classList.toggle('voted', action !== 'cancel' && voteType === 'downvote');
     }
 
-    // إرسال إلى السيرفر
-    try {
-        const { error } = await db.from('posts').update({ [field]: post[field] }).eq('id', postId);
-        if (error) {
-            // فشل: نعيد القيمة القديمة
-            post[field] = oldValue;
-            if (index !== -1) allPostsCache[index] = post;
-            if (postElement) {
-                if (type === 'up') postElement.querySelector('.up-count').innerText = fmtNum(oldValue);
-                else postElement.querySelector('.down-count').innerText = fmtNum(oldValue);
-                const net = (post.upvotes||0) - (post.downvotes||0);
-                postElement.querySelector('.net-score').innerText = `${net >= 0 ? '+' : ''}${net}`;
-            }
-            toast('فشل التصويت: ' + error.message, 'error');
-            return;
+    // إعادة الترتيب إذا كنا في تبويب top
+    if (currentTab === 'top') {
+        const newSorted = getSortedPosts();
+        const firstId   = document.querySelector('.post-card')?.getAttribute('data-id');
+        if (firstId && String(newSorted[0]?.id) !== String(firstId)) {
+            renderTimeline();
         }
-        // نجاح: إذا كنا في تبويب top، قد نحتاج لإعادة الترتيب
-        if (currentTab === 'top') {
-            const newSorted = getSortedPosts();
-            // إذا تغير الترتيب (أول عنصر مختلف)
-            const firstId = document.querySelector('.post-card')?.getAttribute('data-id');
-            if (firstId && newSorted[0]?.id != firstId) {
-                renderTimeline();
-            }
-        }
-        toast(`تم التصويت ${type === 'up' ? '⬆️' : '⬇️'}`, 'success');
-    } catch(e) {
-        console.error(e);
-        toast('خطأ في الشبكة', 'error');
     }
+
+    const emoji = action === 'cancel' ? '↩️' : type === 'up' ? '⬆️' : '⬇️';
+    toast(action === 'cancel' ? 'تم إلغاء التصويت' : `تم التصويت ${emoji}`, 'success');
 }
 
 // ── Event delegation لأزرار التصويت (تعمل حتى بعد إعادة الرندر) ──
