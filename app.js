@@ -53,6 +53,7 @@ function toast(msg, type='info') {
     if (!el) return;
     el.textContent = msg;
     el.style.background = type==='success'?'#16a34a':type==='error'?'#dc2626':'#0f0f0f';
+    el.style.zIndex = '9999';
     el.classList.remove('hidden');
     clearTimeout(el._t);
     el._t = setTimeout(() => el.classList.add('hidden'), 3500);
@@ -139,6 +140,7 @@ async function handleSignup() {
 }
 
 async function handleLogout() {
+    stopRealtime();
     await db.auth.signOut();
     currentUser = null;
     updateUIForAuth();
@@ -159,6 +161,19 @@ function updateUIForAuth() {
     document.getElementById('user-profile-card')?.classList.toggle('hidden', !loggedIn);
     document.getElementById('composer-logged-in')?.classList.toggle('hidden', !loggedIn);
     document.getElementById('composer-logged-out')?.classList.toggle('hidden', loggedIn);
+
+    // Mobile top bar: hide login btn when logged in, show avatar
+    const mobAuthArea = document.getElementById('mob-auth-area');
+    if (mobAuthArea) {
+        if (loggedIn && currentUser) {
+            const name = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'م';
+            mobAuthArea.innerHTML = `<div style="display:flex;align-items:center;gap:8px">
+                <div style="width:30px;height:30px;border-radius:50%;background:${getColor(name)};display:flex;align-items:center;justify-content:center;font-weight:900;font-size:.78rem;color:#fff;cursor:pointer" onclick="navigateTo('profile')">${getInitial(name)}</div>
+            </div>`;
+        } else {
+            mobAuthArea.innerHTML = `<button id="mob-auth-btn" onclick="openAuthModal()" style="background:var(--dark);color:#fff;border:none;padding:7px 16px;border-radius:20px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fa-solid fa-bolt"></i> دخول</button>`;
+        }
+    }
 
     if (loggedIn && currentUser) {
         const name = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم';
@@ -182,6 +197,7 @@ function updateUIForAuth() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function fetchPosts() {
+    showSkeletons(4);
     const { data, error } = await db.from('posts')
         .select('*')
         .order('created_at', { ascending: false })
@@ -220,6 +236,34 @@ function getSortedPosts() {
     return [...allPostsCache];
 }
 
+function skeletonCard() {
+    return `<div class="card post-card skeleton-card" style="pointer-events:none">
+        <div style="display:flex;gap:12px">
+            <div class="skel skel-av"></div>
+            <div style="flex:1;min-width:0">
+                <div style="display:flex;gap:8px;margin-bottom:10px">
+                    <div class="skel" style="width:90px;height:13px;border-radius:6px"></div>
+                    <div class="skel" style="width:50px;height:13px;border-radius:6px"></div>
+                </div>
+                <div class="skel" style="width:100%;height:13px;border-radius:6px;margin-bottom:8px"></div>
+                <div class="skel" style="width:85%;height:13px;border-radius:6px;margin-bottom:8px"></div>
+                <div class="skel" style="width:60%;height:13px;border-radius:6px;margin-bottom:14px"></div>
+                <div style="display:flex;gap:8px">
+                    <div class="skel" style="width:56px;height:28px;border-radius:20px"></div>
+                    <div class="skel" style="width:56px;height:28px;border-radius:20px"></div>
+                    <div class="skel" style="width:56px;height:28px;border-radius:20px"></div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function showSkeletons(count = 4) {
+    const container = document.getElementById('posts-container');
+    if (!container) return;
+    container.innerHTML = Array(count).fill(0).map(skeletonCard).join('');
+}
+
 function renderTimeline() {
     const container = document.getElementById('posts-container');
     if (!container) return;
@@ -229,14 +273,13 @@ function renderTimeline() {
             <div style="font-size:2.5rem;margin-bottom:12px">📭</div>
             <p style="color:var(--muted);font-size:.9rem">لا توجد منشورات بعد.<br>كن أول من يشارك!</p>
         </div>`;
-        bindVoteEvents(); // لا حاجة لكن للأمان
+        bindVoteEvents();
         return;
     }
     scrollY = window.scrollY;
-    // نمرر `true` فقط للمنشور الأول إذا كان التبويب 'top'
     container.innerHTML = posts.map((post, idx) => postCard(post, currentTab === 'top' && idx === 0)).join('');
     window.scrollTo(0, scrollY);
-    bindVoteEvents(); // إعادة ربط أزرار التصويت بعد الرندر
+    bindVoteEvents();
 }
 
 // دالة بطاقة المنشور - التاج الآن بجانب الاسم داخل نفس الصف
@@ -839,6 +882,125 @@ async function closeCurrentRoom() {
 }
 
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// REALTIME — Supabase channels للتحديث الفوري
+// ══════════════════════════════════════════════════════════════════════════════
+
+let realtimeChannels = [];
+
+function startRealtime() {
+    stopRealtime(); // cleanup أي channels قديمة
+
+    // ── Channel 1: Posts (insert / update / delete) ──
+    const postsCh = db.channel('posts-changes')
+        .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'posts' },
+            (payload) => {
+                if (payload.eventType === 'INSERT') {
+                    // لا تضيف بوست نفس المستخدم مرتين (هو بيضيفه optimistically)
+                    if (currentUser && payload.new.user_id === currentUser.id) return;
+                    allPostsCache.unshift(payload.new);
+                    renderTimeline();
+                    updateStats();
+                } else if (payload.eventType === 'UPDATE') {
+                    const idx = allPostsCache.findIndex(p => p.id === payload.new.id);
+                    if (idx !== -1) {
+                        allPostsCache[idx] = { ...allPostsCache[idx], ...payload.new };
+                        // تحديث DOM بدون إعادة رندر كامل
+                        const el = document.querySelector(`.post-card[data-id="${payload.new.id}"]`);
+                        if (el) {
+                            const up   = el.querySelector('.up-count');
+                            const down = el.querySelector('.down-count');
+                            const net  = el.querySelector('.net-score');
+                            if (up)   up.innerText   = fmtNum(payload.new.upvotes   || 0);
+                            if (down) down.innerText = fmtNum(payload.new.downvotes || 0);
+                            if (net) {
+                                const n = (payload.new.upvotes||0)-(payload.new.downvotes||0);
+                                net.innerText = `${n>=0?'+':''}${n}`;
+                            }
+                            // comment_count
+                            const cc = el.querySelector(`.comment-count-${payload.new.id}`);
+                            if (cc) cc.innerText = fmtNum(payload.new.comment_count || 0);
+                        }
+                    }
+                } else if (payload.eventType === 'DELETE') {
+                    allPostsCache = allPostsCache.filter(p => p.id !== payload.old.id);
+                    const el = document.querySelector(`.post-card[data-id="${payload.old.id}"]`);
+                    if (el) {
+                        el.style.transition = 'opacity .25s, transform .25s';
+                        el.style.opacity    = '0';
+                        el.style.transform  = 'scale(.97)';
+                        setTimeout(() => el.remove(), 250);
+                    }
+                    updateStats();
+                }
+            }
+        )
+        .subscribe();
+
+    realtimeChannels.push(postsCh);
+}
+
+function startCommentsRealtime(postId) {
+    // أوقف أي channel تعليقات قديم
+    const old = realtimeChannels.find(c => c.topic?.includes('comments-'));
+    if (old) { db.removeChannel(old); realtimeChannels = realtimeChannels.filter(c => c !== old); }
+
+    const commentsCh = db.channel(`comments-${postId}`)
+        .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'comments', filter: `post_id=eq.${postId}` },
+            (payload) => {
+                if (!commentsCache[postId]) commentsCache[postId] = [];
+
+                if (payload.eventType === 'INSERT') {
+                    // تجاهل لو هو نفس المستخدم أضافه (optimistic update موجود)
+                    if (currentUser && payload.new.user_id === currentUser.id) return;
+                    commentsCache[postId].push(payload.new);
+
+                    const list = document.getElementById('comments-list');
+                    if (list && activeCommentsPostId === postId) {
+                        // شيل placeholder لو موجود
+                        if (list.querySelector('[style*="padding:40px"]')) list.innerHTML = '';
+                        const tmp = document.createElement('div');
+                        tmp.innerHTML = commentCard(payload.new);
+                        const el = tmp.firstElementChild;
+                        el.style.opacity   = '0';
+                        el.style.transform = 'translateY(8px)';
+                        list.appendChild(el);
+                        requestAnimationFrame(() => {
+                            el.style.transition = 'opacity .2s, transform .2s';
+                            el.style.opacity    = '1';
+                            el.style.transform  = 'translateY(0)';
+                        });
+                        list.scrollTop = list.scrollHeight;
+                    }
+                    // تحديث عداد التعليقات
+                    const count = commentsCache[postId].length;
+                    const cc = document.querySelector(`.comment-count-${postId}`);
+                    if (cc) cc.innerText = fmtNum(count);
+
+                } else if (payload.eventType === 'DELETE') {
+                    commentsCache[postId] = commentsCache[postId].filter(c => c.id !== payload.old.id);
+                    const el = document.getElementById(`comment-${payload.old.id}`);
+                    if (el) {
+                        el.style.transition = 'opacity .2s';
+                        el.style.opacity    = '0';
+                        setTimeout(() => el.remove(), 200);
+                    }
+                }
+            }
+        )
+        .subscribe();
+
+    realtimeChannels.push(commentsCh);
+}
+
+function stopRealtime() {
+    realtimeChannels.forEach(ch => db.removeChannel(ch));
+    realtimeChannels = [];
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // COMMENTS SYSTEM
 // ══════════════════════════════════════════════════════════════════════════════
@@ -869,6 +1031,7 @@ async function openComments(postId) {
     if (inp) { inp.value = ''; inp.style.height = 'auto'; }
 
     await loadComments(postId);
+    startCommentsRealtime(postId);
 }
 
 function closeComments() {
@@ -1032,6 +1195,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentUser = session?.user ?? null;
     updateUIForAuth();
     fetchPosts();
+    startRealtime();
 
     // ربط زر النشر (بدون onclick في HTML)
     const postBtn = document.getElementById('post-submit-btn');
