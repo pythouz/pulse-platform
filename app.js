@@ -272,11 +272,15 @@ function postCard(post, isTopPost = false) {
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                     <button class="reaction-btn vote-up${upClass}" data-id="${post.id}" data-type="up">
                         <i class="fa-solid fa-arrow-up"></i>
-                        <span class="up-count" style="display:none">${fmtNum(post.upvotes||0)}</span>
+                        <span class="up-count">${fmtNum(post.upvotes||0)}</span>
                     </button>
                     <button class="reaction-btn vote-down${downClass}" data-id="${post.id}" data-type="down">
                         <i class="fa-solid fa-arrow-down"></i>
-                        <span class="down-count" style="display:none">${fmtNum(post.downvotes||0)}</span>
+                        <span class="down-count">${fmtNum(post.downvotes||0)}</span>
+                    </button>
+                    <button class="reaction-btn comment-btn" data-id="${post.id}" onclick="openComments(${post.id})">
+                        <i class="fa-regular fa-comment"></i>
+                        <span class="comment-count-${post.id}">${fmtNum(post.comment_count||0)}</span>
                     </button>
                     <span class="net-score" style="display:none">${netSign}${net}</span>
                 </div>
@@ -377,6 +381,12 @@ async function handleVote(postId, type) {
         const downBtn = postElement.querySelector('.vote-down');
         if (upBtn)   upBtn.classList.toggle('voted',   action !== 'cancel' && voteType === 'upvote');
         if (downBtn) downBtn.classList.toggle('voted', action !== 'cancel' && voteType === 'downvote');
+        // نبضة animation على الزر
+        const activeBtn = voteType === 'upvote' ? upBtn : downBtn;
+        if (activeBtn && action !== 'cancel') {
+            activeBtn.classList.add('vote-pulse');
+            setTimeout(() => activeBtn.classList.remove('vote-pulse'), 350);
+        }
     }
 
     // إعادة الترتيب إذا كنا في تبويب top
@@ -828,6 +838,178 @@ async function closeCurrentRoom() {
     await leaveCurrentAudioRoom();
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMMENTS SYSTEM
+// ══════════════════════════════════════════════════════════════════════════════
+
+let activeCommentsPostId = null;
+let commentsCache        = {};   // { postId: [comments] }
+
+async function openComments(postId) {
+    if (!currentUser) { openAuthModal(); return; }
+    activeCommentsPostId = postId;
+
+    const post = allPostsCache.find(p => p.id === postId);
+    const modal = document.getElementById('comments-modal');
+    const titleEl = document.getElementById('comments-post-preview');
+    if (titleEl && post) {
+        titleEl.textContent = post.content.length > 80
+            ? post.content.slice(0, 80) + '...'
+            : post.content;
+    }
+
+    document.getElementById('comments-list').innerHTML =
+        '<div class="comments-loading"><i class="fa-solid fa-spinner fa-spin"></i> جاري التحميل...</div>';
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    // reset input
+    const inp = document.getElementById('comment-input');
+    if (inp) { inp.value = ''; inp.style.height = 'auto'; }
+
+    await loadComments(postId);
+}
+
+function closeComments() {
+    document.getElementById('comments-modal').classList.add('hidden');
+    document.body.style.overflow = '';
+    activeCommentsPostId = null;
+}
+
+async function loadComments(postId) {
+    const { data, error } = await db
+        .from('comments')
+        .select('*')
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true });
+
+    if (error) {
+        document.getElementById('comments-list').innerHTML =
+            '<p style="text-align:center;color:#ef4444;padding:20px">فشل تحميل التعليقات</p>';
+        return;
+    }
+
+    commentsCache[postId] = data || [];
+    renderComments(postId);
+
+    // تحديث عداد التعليقات في الكارد
+    const countEl = document.querySelector(`.comment-count-${postId}`);
+    if (countEl) countEl.innerText = fmtNum((data || []).length);
+}
+
+function renderComments(postId) {
+    const list   = document.getElementById('comments-list');
+    const comments = commentsCache[postId] || [];
+
+    if (!comments.length) {
+        list.innerHTML = `<div style="text-align:center;padding:40px 20px">
+            <div style="font-size:2rem;margin-bottom:10px">💬</div>
+            <p style="color:var(--muted);font-size:.85rem">لا توجد تعليقات بعد.<br>كن أول من يعلق!</p>
+        </div>`;
+        return;
+    }
+
+    list.innerHTML = comments.map(c => commentCard(c)).join('');
+    // scroll to bottom
+    list.scrollTop = list.scrollHeight;
+}
+
+function commentCard(c) {
+    const name    = c.author_name || 'مجهول';
+    const isOwner = currentUser?.id === c.user_id;
+    const initials = getInitial(name);
+    const color    = getColor(name);
+
+    return `<div class="comment-item" id="comment-${c.id}">
+        <div style="width:32px;height:32px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-weight:900;font-size:.75rem;color:#fff;flex-shrink:0">${initials}</div>
+        <div class="comment-bubble">
+            <div class="comment-header">
+                <span class="comment-author">${esc(name)}</span>
+                <span class="comment-time">${fmtDate(c.created_at)}</span>
+                ${isOwner ? `<button onclick="deleteComment(${c.id})" class="comment-delete-btn" title="حذف"><i class="fa-regular fa-trash-can"></i></button>` : ''}
+            </div>
+            <p class="comment-text">${esc(c.content)}</p>
+        </div>
+    </div>`;
+}
+
+async function submitComment() {
+    if (!currentUser) { openAuthModal(); return; }
+    const inp     = document.getElementById('comment-input');
+    const content = inp?.value?.trim();
+    if (!content || !activeCommentsPostId) return;
+
+    const btn  = document.getElementById('comment-submit-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+
+    const name = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم';
+
+    const { data, error } = await db.from('comments').insert({
+        post_id:     activeCommentsPostId,
+        user_id:     currentUser.id,
+        author_name: name,
+        content,
+    }).select().single();
+
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i>'; }
+
+    if (error) { toast('فشل إرسال التعليق', 'error'); return; }
+
+    inp.value = '';
+    inp.style.height = 'auto';
+
+    // إضافة فورية للكاش والـ DOM
+    if (!commentsCache[activeCommentsPostId]) commentsCache[activeCommentsPostId] = [];
+    commentsCache[activeCommentsPostId].push(data);
+
+    const list = document.getElementById('comments-list');
+    // إزالة placeholder لو موجود
+    if (list.querySelector('[style*="padding:40px"]')) list.innerHTML = '';
+
+    const tmp = document.createElement('div');
+    tmp.innerHTML = commentCard(data);
+    const el = tmp.firstElementChild;
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(10px)';
+    list.appendChild(el);
+    requestAnimationFrame(() => {
+        el.style.transition = 'opacity .25s, transform .25s';
+        el.style.opacity    = '1';
+        el.style.transform  = 'translateY(0)';
+    });
+    list.scrollTop = list.scrollHeight;
+
+    // تحديث العداد في الكارد
+    const count = commentsCache[activeCommentsPostId].length;
+    const countEl = document.querySelector(`.comment-count-${activeCommentsPostId}`);
+    if (countEl) countEl.innerText = fmtNum(count);
+}
+
+async function deleteComment(commentId) {
+    if (!currentUser) return;
+    const el = document.getElementById(`comment-${commentId}`);
+    if (el) {
+        el.style.transition = 'opacity .2s, transform .2s';
+        el.style.opacity    = '0';
+        el.style.transform  = 'scale(.97)';
+        setTimeout(() => el.remove(), 200);
+    }
+
+    // إزالة من الكاش
+    if (activeCommentsPostId && commentsCache[activeCommentsPostId]) {
+        commentsCache[activeCommentsPostId] =
+            commentsCache[activeCommentsPostId].filter(c => c.id !== commentId);
+        const count = commentsCache[activeCommentsPostId].length;
+        const countEl = document.querySelector(`.comment-count-${activeCommentsPostId}`);
+        if (countEl) countEl.innerText = fmtNum(count);
+    }
+
+    const { error } = await db.from('comments').delete()
+        .eq('id', commentId).eq('user_id', currentUser.id);
+    if (error) { toast('فشل حذف التعليق', 'error'); loadComments(activeCommentsPostId); }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // GLOBAL EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -838,7 +1020,8 @@ Object.assign(window, {
     fetchRooms, showCreateRoomModal, hideCreateRoomModal, outsideCloseRoom,
     createNewAudioRoom, joinRoom, leaveCurrentAudioRoom, closeCurrentRoom,
     toggleMic, raiseHand,
-    handleVote, // للاستخدام المباشر إن لزم
+    handleVote,
+    openComments, closeComments, submitComment, deleteComment,
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -860,6 +1043,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // التعامل مع زر Esc
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
+            if (!document.getElementById('comments-modal')?.classList.contains('hidden'))
+                closeComments();
             if (!document.getElementById('create-room-modal')?.classList.contains('hidden'))
                 hideCreateRoomModal();
             if (!document.getElementById('auth-modal')?.classList.contains('hidden'))
