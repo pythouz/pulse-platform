@@ -9,6 +9,7 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // ── State ──
 let currentUser        = null;
 let allPostsCache      = [];
+let userVotesCache     = {};   // { postId: 'upvote' | 'downvote' }
 let currentTab         = 'latest';
 let currentRoom        = null;
 let currentRoomId      = null;
@@ -187,6 +188,18 @@ async function fetchPosts() {
         .limit(80);
     if (error) { console.error('fetchPosts:', error); return; }
     allPostsCache = data || [];
+
+    // جلب تصويتات المستخدم الحالي لتلوين الأسهم
+    userVotesCache = {};
+    if (currentUser) {
+        const postIds = allPostsCache.map(p => p.id);
+        const { data: votes } = await db.from('post_votes')
+            .select('post_id, vote_type')
+            .eq('user_id', currentUser.id)
+            .in('post_id', postIds);
+        (votes || []).forEach(v => { userVotesCache[v.post_id] = v.vote_type; });
+    }
+
     renderTimeline();
     updateStats();
 }
@@ -235,10 +248,13 @@ function postCard(post, isTopPost = false) {
     const content = esc(post.content).replace(/#(\S+)/g,
         '<span style="color:var(--accent2);cursor:pointer;font-weight:700" onclick="filterByTag(\'$1\')">#$1</span>');
 
-    // إضافة كلاس ذهبي وتأثير للبطاقة إذا كانت الأعلى تقييماً
-    const topClass = isTopPost ? 'golden-post' : '';
-    // التاج أصبح داخل صف الاسم وليس منفصلاً
+    const topClass  = isTopPost ? 'golden-post' : '';
     const crownHtml = isTopPost ? '<span style="font-size:1rem; margin-right:4px;">👑</span>' : '';
+
+    // تحديد حالة التصويت الحالية لتلوين الأسهم
+    const myVote    = userVotesCache[post.id] || null;
+    const upClass   = myVote === 'upvote'   ? ' voted' : '';
+    const downClass = myVote === 'downvote' ? ' voted' : '';
 
     return `<div class="card post-card fade-up ${topClass}" data-id="${post.id}" style="position:relative; ${isTopPost ? 'border:2px solid #FFD700; box-shadow:0 0 20px rgba(255,215,0,0.5);' : ''}">
         <div style="display:flex;gap:12px">
@@ -253,20 +269,21 @@ function postCard(post, isTopPost = false) {
                     ${isOwner ? `<button onclick="deletePost('${post.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;padding:4px 6px;border-radius:8px" title="حذف"><i class="fa-regular fa-trash-can"></i></button>` : ''}
                 </div>
                 <p style="font-size:.88rem;line-height:1.7;color:#2a2a2a;white-space:pre-wrap;margin:0 0 12px">${content}</p>
-                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                    <button class="reaction-btn vote-up" data-id="${post.id}" data-type="up">
-                        <i class="fa-solid fa-arrow-up"></i> <span class="up-count">${fmtNum(post.upvotes||0)}</span>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <button class="reaction-btn vote-up${upClass}" data-id="${post.id}" data-type="up">
+                        <i class="fa-solid fa-arrow-up"></i>
+                        <span class="up-count" style="display:none">${fmtNum(post.upvotes||0)}</span>
                     </button>
-                    <button class="reaction-btn vote-down" data-id="${post.id}" data-type="down">
-                        <i class="fa-solid fa-arrow-down"></i> <span class="down-count">${fmtNum(post.downvotes||0)}</span>
+                    <button class="reaction-btn vote-down${downClass}" data-id="${post.id}" data-type="down">
+                        <i class="fa-solid fa-arrow-down"></i>
+                        <span class="down-count" style="display:none">${fmtNum(post.downvotes||0)}</span>
                     </button>
-                    <span class="net-score" style="font-size:.85rem;font-weight:800;background:var(--accent2);color:white;padding:4px 10px;border-radius:30px;">${netSign}${net}</span>
+                    <span class="net-score" style="display:none">${netSign}${net}</span>
                 </div>
             </div>
         </div>
     </div>`;
 }
-
 // ── التصويت: يستخدم post_votes للتتبع + يمنع التصويت المكرر + يدعم إلغاء التصويت ──
 async function handleVote(postId, type) {
     if (!currentUser) { openAuthModal(); return; }
@@ -371,6 +388,13 @@ async function handleVote(postId, type) {
         }
     }
 
+    // تحديث userVotesCache
+    if (action === 'cancel') {
+        delete userVotesCache[postId];
+    } else {
+        userVotesCache[postId] = voteType;
+    }
+
     const emoji = action === 'cancel' ? '↩️' : type === 'up' ? '⬆️' : '⬇️';
     toast(action === 'cancel' ? 'تم إلغاء التصويت' : `تم التصويت ${emoji}`, 'success');
 }
@@ -419,10 +443,26 @@ async function createPost() {
 async function deletePost(postId) {
     if (!currentUser) return;
     if (!confirm('حذف هذا المنشور؟')) return;
+
+    // إزالة فورية من الـ DOM قبل ما نستنى الـ server
+    const postEl = document.querySelector(`.post-card[data-id="${postId}"]`);
+    if (postEl) {
+        postEl.style.transition = 'opacity .2s, transform .2s';
+        postEl.style.opacity    = '0';
+        postEl.style.transform  = 'scale(.97)';
+        setTimeout(() => postEl.remove(), 200);
+    }
+
+    // إزالة من الكاش فوراً
+    allPostsCache = allPostsCache.filter(p => String(p.id) !== String(postId));
+    updateStats();
+
     const { error } = await db.from('posts').delete().eq('id', postId).eq('user_id', currentUser.id);
-    if (error) return toast('فشل الحذف', 'error');
-    allPostsCache = allPostsCache.filter(p => p.id !== postId);
-    renderTimeline();
+    if (error) {
+        toast('فشل الحذف', 'error');
+        fetchPosts();
+        return;
+    }
     toast('تم الحذف', 'info');
 }
 
