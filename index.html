@@ -456,13 +456,13 @@
             color: var(--muted);
             font-size: .85rem;
         }
-        /* vote-pulse animation */
-        @keyframes votePulse {
+        /* vote-Elite animation */
+        @keyframes voteElite {
             0%   { transform: scale(1); }
             40%  { transform: scale(1.22); }
             100% { transform: scale(1); }
         }
-        .vote-pulse { animation: votePulse .35s ease; }
+        .vote-Elite { animation: voteElite .35s ease; }
         /* vote count style */
         .reaction-btn .up-count,
         .reaction-btn .down-count { font-variant-numeric: tabular-nums; min-width: 16px; }
@@ -495,7 +495,7 @@
         <div style="width:30px;height:30px;background:var(--dark);border-radius:9px;display:flex;align-items:center;justify-content:center">
             <span style="color:#fff;font-size:.9rem;font-weight:900">P</span>
         </div>
-        <span style="font-size:1.1rem;font-weight:900;color:var(--dark)">Pulse</span>
+        <span style="font-size:1.1rem;font-weight:900;color:var(--dark)">Elite</span>
     </div>
     <div id="mob-auth-area">
         <button id="mob-auth-btn" onclick="openAuthModal()" style="background:var(--dark);color:#fff;border:none;padding:7px 16px;border-radius:20px;font-size:.78rem;font-weight:700;cursor:pointer">
@@ -514,7 +514,7 @@
         <div style="text-align:center;margin-bottom:24px">
             <div style="font-size:2rem;margin-bottom:8px">⚡</div>
             <h2 id="auth-modal-title" style="font-size:1.35rem;font-weight:900;color:var(--dark)">تسجيل الدخول</h2>
-            <p style="font-size:.82rem;color:var(--muted);margin-top:4px">مرحباً بك في Pulse</p>
+            <p style="font-size:.82rem;color:var(--muted);margin-top:4px">مرحباً بك في Elite</p>
         </div>
 
         <!-- Login -->
@@ -630,7 +630,7 @@
                 <div style="width:38px;height:38px;background:var(--dark);border-radius:12px;display:flex;align-items:center;justify-content:center">
                     <span style="color:#fff;font-size:1.1rem;font-weight:900">P</span>
                 </div>
-                <span style="font-size:1.3rem;font-weight:900;color:var(--dark)">Pulse</span>
+                <span style="font-size:1.3rem;font-weight:900;color:var(--dark)">Elite</span>
             </div>
         </div>
 
@@ -715,7 +715,7 @@
             <!-- Composer logged out -->
             <div id="composer-logged-out" class="card" style="padding:20px;text-align:center">
                 <div style="font-size:1.6rem;margin-bottom:8px">👋</div>
-                <p style="font-size:.88rem;font-weight:600;color:var(--dark);margin-bottom:12px">انضم لمجتمع Pulse وشارك أفكارك</p>
+                <p style="font-size:.88rem;font-weight:600;color:var(--dark);margin-bottom:12px">انضم لمجتمع Elite وشارك أفكارك</p>
                 <button onclick="openAuthModal()" class="btn btn-accent" style="padding:10px 24px">
                     ابدأ الآن — مجاناً ✨
                 </button>
@@ -791,7 +791,7 @@
                     <div>
                         <h2 id="profile-display-name" style="font-size:1.25rem;font-weight:900;margin:0 0 3px">—</h2>
                         <p id="profile-username" style="font-size:.8rem;color:var(--muted);margin:0"></p>
-                        <span class="badge badge-new" style="margin-top:8px;display:inline-flex">✦ عضو Pulse</span>
+                        <span class="badge badge-new" style="margin-top:8px;display:inline-flex">✦ عضو Elite</span>
                     </div>
                 </div>
 
