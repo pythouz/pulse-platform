@@ -469,8 +469,7 @@ function postCard(post, isTopPost = false) {
                         <i class="fa-regular fa-comment"></i>
                         <span class="comment-count-${post.id}">${fmtNum(post.comment_count||0)}</span>
                     </button>
-                    <button class="reaction-btn" onclick="sharePost(${post.id}, '${esc(post.content).replace(/'/g,'\'').replace(/
-/g,' ')}')" style="margin-right:auto" title="مشاركة">
+                    <button class="reaction-btn" onclick="sharePost(${post.id})" style="margin-right:auto" title="مشاركة">
                         <i class="fa-solid fa-share-nodes"></i>
                     </button>
                     <span class="net-score" style="display:none">${netSign}${net}</span>
@@ -1642,9 +1641,10 @@ async function deleteComment(commentId) {
 // SHARE POST
 // ══════════════════════════════════════════════════════════════════════════════
 
-async function sharePost(postId, content) {
+async function sharePost(postId) {
+    const post = allPostsCache.find(p => p.id === postId);
+    const text = post ? (post.content.length > 100 ? post.content.slice(0,100)+'...' : post.content) : '';
     const url  = `${location.origin}${location.pathname}?post=${postId}`;
-    const text = content.length > 100 ? content.slice(0, 100) + '...' : content;
 
     if (navigator.share) {
         try {
