@@ -136,11 +136,14 @@ async function handleSignup() {
     if (btn) { btn.innerHTML = 'إنشاء الحساب ✨'; btn.disabled = false; }
     if (error) return toast(error.message, 'error');
     closeAuthModal();
-    toast('مرحباً بك في Pulse! 🎊', 'success');
+    toast('مرحباً بك في Elite! 🎊', 'success');
 }
 
 async function handleLogout() {
     stopRealtime();
+    notificationsCache = [];
+    unreadCount = 0;
+    updateNotifBadge();
     await db.auth.signOut();
     currentUser = null;
     updateUIForAuth();
@@ -151,7 +154,14 @@ async function handleLogout() {
 db.auth.onAuthStateChange((event, session) => {
     currentUser = session?.user ?? null;
     updateUIForAuth();
-    if (event === 'SIGNED_IN') fetchPosts();
+    if (event === 'SIGNED_IN') {
+        fetchPosts();
+        fetchNotifications();
+        startNotificationsRealtime();
+        startRealtime();
+        startNotifRealtime();
+        fetchNotifications();
+    }
 });
 
 function updateUIForAuth() {
@@ -305,7 +315,8 @@ function postCard(post, isTopPost = false) {
             <div style="flex:1;min-width:0">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                     <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
-                        <span style="font-weight:800;font-size:.88rem;color:var(--dark)">${esc(name)}</span>
+                        <span style="font-weight:800;font-size:.88rem;color:var(--dark);cursor:pointer" 
+                              onclick="event.stopPropagation();openPublicProfile('${post.user_id}','${esc(name).replace(/'/g,'\\'+'\'')}')">${esc(name)}</span>
                         ${crownHtml}
                         <span style="font-size:.72rem;color:var(--muted)">${fmtDate(post.created_at)}</span>
                     </div>
@@ -382,6 +393,12 @@ async function handleVote(postId, type) {
         if (voteType === 'upvote') upDelta = 1;
         else                       downDelta = 1;
         action = 'add';
+        // إشعار upvote فقط
+        if (voteType === 'upvote') {
+            const actorName = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم';
+            createNotification('upvote', post.id, post.user_id, actorName,
+                `أعجب بمنشورك: "${post.content.slice(0,40)}${post.content.length>40?'...':''}"`);
+        }
     }
 
     // تحديث العدادات في DB (الصلاحية ليست مشكلة لأن الكاتب هو صاحب المنشور فقط)
@@ -438,6 +455,15 @@ async function handleVote(postId, type) {
         const firstId   = document.querySelector('.post-card')?.getAttribute('data-id');
         if (firstId && String(newSorted[0]?.id) !== String(firstId)) {
             renderTimeline();
+        }
+    }
+
+    // إشعار صاحب البوست عند التصويت بالأعلى (مرة واحدة فقط، مش عند الإلغاء)
+    if (action === 'add' && voteType === 'upvote') {
+        const postOwner = allPostsCache.find(p => p.id === postId);
+        if (postOwner && postOwner.user_id !== currentUser.id) {
+            const myName = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'شخص';
+            createNotification(postOwner.user_id, 'vote', `${myName} أعجب بمنشورك ⬆️`, postId);
         }
     }
 
@@ -883,6 +909,301 @@ async function closeCurrentRoom() {
 
 
 
+
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PUBLIC PROFILE
+// ══════════════════════════════════════════════════════════════════════════════
+
+let publicProfileUserId = null;
+
+function openPublicProfile(userId, userName) {
+    if (!userId) return;
+    publicProfileUserId = userId;
+    const modal = document.getElementById('public-profile-modal');
+    if (!modal) return;
+
+    // header placeholder
+    const color   = getColor(userName);
+    const initial = getInitial(userName);
+    document.getElementById('pp-avatar').style.background = color;
+    document.getElementById('pp-avatar').textContent      = initial;
+    document.getElementById('pp-name').textContent        = userName;
+    document.getElementById('pp-posts-count').textContent = '...';
+    document.getElementById('pp-votes-count').textContent = '...';
+    document.getElementById('pp-posts-list').innerHTML    =
+        '<div style="text-align:center;padding:24px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    loadPublicProfilePosts(userId);
+}
+
+async function loadPublicProfilePosts(userId) {
+    const { data, error } = await db.from('posts')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+    if (error || !data) return;
+
+    const totalVotes = data.reduce((s, p) => s + (p.upvotes || 0), 0);
+    document.getElementById('pp-posts-count').textContent = fmtNum(data.length);
+    document.getElementById('pp-votes-count').textContent = fmtNum(totalVotes);
+
+    const listEl = document.getElementById('pp-posts-list');
+    if (!data.length) {
+        listEl.innerHTML = '<p style="text-align:center;color:var(--muted);padding:24px;font-size:.85rem">لا توجد منشورات بعد</p>';
+        return;
+    }
+    listEl.innerHTML = data.map(p => {
+        const net = (p.upvotes||0) - (p.downvotes||0);
+        return `<div style="padding:14px 0;border-bottom:1px solid var(--border)">
+            <p style="font-size:.86rem;line-height:1.65;color:#2a2a2a;margin:0 0 8px;white-space:pre-wrap">${esc(p.content)}</p>
+            <div style="display:flex;align-items:center;gap:12px">
+                <span style="font-size:.72rem;color:var(--muted)">${fmtDate(p.created_at)}</span>
+                <span style="font-size:.75rem;color:#22c55e;font-weight:700">
+                    <i class="fa-solid fa-arrow-up"></i> ${p.upvotes||0}
+                </span>
+                <span style="font-size:.75rem;color:var(--muted);font-weight:700">
+                    <i class="fa-regular fa-comment"></i> ${p.comment_count||0}
+                </span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function closePublicProfile() {
+    document.getElementById('public-profile-modal')?.classList.add('hidden');
+    document.body.style.overflow = '';
+    publicProfileUserId = null;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SEARCH
+// ══════════════════════════════════════════════════════════════════════════════
+
+let searchTimeout = null;
+
+function openSearch() {
+    const modal = document.getElementById('search-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => document.getElementById('search-input')?.focus(), 100);
+    renderSearchResults('');
+}
+
+function closeSearch() {
+    document.getElementById('search-modal')?.classList.add('hidden');
+    document.body.style.overflow = '';
+    const inp = document.getElementById('search-input');
+    if (inp) inp.value = '';
+}
+
+function onSearchInput(val) {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => renderSearchResults(val.trim()), 200);
+}
+
+function renderSearchResults(q) {
+    const container = document.getElementById('search-results');
+    if (!container) return;
+
+    if (!q) {
+        // عرض المنشورات الأحدث كـ suggestions
+        const recent = allPostsCache.slice(0, 5);
+        if (!recent.length) {
+            container.innerHTML = `<p style="text-align:center;color:var(--muted);padding:32px;font-size:.85rem">ابدأ الكتابة للبحث...</p>`;
+            return;
+        }
+        container.innerHTML = `<div style="padding:10px 16px 6px"><span style="font-size:.68rem;font-weight:800;color:var(--muted);letter-spacing:1px;text-transform:uppercase">الأحدث</span></div>`
+            + recent.map(p => searchResultCard(p)).join('');
+        return;
+    }
+
+    const lower = q.toLowerCase();
+    const results = allPostsCache.filter(p =>
+        p.content?.toLowerCase().includes(lower) ||
+        p.author_name?.toLowerCase().includes(lower)
+    );
+
+    if (!results.length) {
+        container.innerHTML = `<div style="text-align:center;padding:40px 20px">
+            <div style="font-size:2rem;margin-bottom:8px">🔍</div>
+            <p style="color:var(--muted);font-size:.85rem">لا نتائج لـ "${esc(q)}"</p>
+        </div>`;
+        return;
+    }
+
+    container.innerHTML = `<div style="padding:10px 16px 6px"><span style="font-size:.68rem;font-weight:800;color:var(--muted);letter-spacing:1px">${results.length} نتيجة</span></div>`
+        + results.slice(0, 20).map(p => searchResultCard(p)).join('');
+}
+
+function searchResultCard(p) {
+    const name = p.author_name || 'مجهول';
+    const preview = p.content.length > 90 ? p.content.slice(0, 90) + '...' : p.content;
+    return `<div onclick="goToPost(${p.id})" style="display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s"
+                 onmouseenter="this.style.background='#f7f4ef'" onmouseleave="this.style.background=''">
+        ${avatar(name, 'av-sm')}
+        <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+                <span style="font-size:.8rem;font-weight:800;color:var(--dark)">${esc(name)}</span>
+                <span style="font-size:.7rem;color:var(--muted)">${fmtDate(p.created_at)}</span>
+            </div>
+            <p style="font-size:.82rem;color:#444;margin:0;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(preview)}</p>
+        </div>
+    </div>`;
+}
+
+function goToPost(postId) {
+    closeSearch();
+    navigateTo('timeline');
+    setTimeout(() => {
+        const el = document.querySelector(`.post-card[data-id="${postId}"]`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.style.transition = 'box-shadow .3s';
+            el.style.boxShadow  = '0 0 0 3px var(--accent)';
+            setTimeout(() => el.style.boxShadow = '', 2000);
+        }
+    }, 300);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+let notificationsCache = [];
+let unreadCount        = 0;
+
+async function fetchNotifications() {
+    if (!currentUser) return;
+    const { data } = await db.from('notifications')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false })
+        .limit(30);
+    notificationsCache = data || [];
+    unreadCount = notificationsCache.filter(n => !n.is_read).length;
+    updateNotifBadge();
+}
+
+function updateNotifBadge() {
+    const badges = document.querySelectorAll('.notif-badge');
+    badges.forEach(b => {
+        b.textContent  = unreadCount > 9 ? '9+' : unreadCount;
+        b.style.display = unreadCount > 0 ? 'flex' : 'none';
+    });
+}
+
+async function markAllNotifsRead() {
+    if (!currentUser || !unreadCount) return;
+    await db.from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', currentUser.id)
+        .eq('is_read', false);
+    notificationsCache.forEach(n => n.is_read = true);
+    unreadCount = 0;
+    updateNotifBadge();
+    renderNotifications();
+}
+
+function openNotifications() {
+    const modal = document.getElementById('notif-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    renderNotifications();
+    if (unreadCount > 0) markAllNotifsRead();
+}
+
+function closeNotifications() {
+    document.getElementById('notif-modal')?.classList.add('hidden');
+    document.body.style.overflow = '';
+}
+
+function renderNotifications() {
+    const list = document.getElementById('notif-list');
+    if (!list) return;
+    if (!notificationsCache.length) {
+        list.innerHTML = `<div style="text-align:center;padding:48px 20px">
+            <div style="font-size:2.5rem;margin-bottom:10px">🔔</div>
+            <p style="color:var(--muted);font-size:.85rem">لا توجد إشعارات بعد</p>
+        </div>`;
+        return;
+    }
+    list.innerHTML = notificationsCache.map(n => {
+        const icon = n.type === 'comment' ? '💬' : n.type === 'upvote' ? '⬆️' : '🔔';
+        const bg   = n.is_read ? '' : 'background:#fff8f6;';
+        return `<div class="notif-item ${n.is_read ? '' : 'notif-unread'}" 
+                     style="${bg}display:flex;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s"
+                     onmouseenter="this.style.background='#f7f4ef'"
+                     onmouseleave="this.style.background='${n.is_read ? '' : '#fff8f6'}'"
+                     onclick="handleNotifClick(${n.post_id})">
+            <div style="font-size:1.3rem;flex-shrink:0;margin-top:2px">${icon}</div>
+            <div style="flex:1;min-width:0">
+                <p style="font-size:.84rem;font-weight:700;color:var(--dark);margin:0 0 3px">${esc(n.actor_name || 'مستخدم')}</p>
+                <p style="font-size:.78rem;color:var(--muted);margin:0;line-height:1.5">${esc(n.message || '')}</p>
+                <p style="font-size:.68rem;color:var(--muted);margin:4px 0 0">${fmtDate(n.created_at)}</p>
+            </div>
+            ${!n.is_read ? '<div style="width:8px;height:8px;background:var(--accent);border-radius:50%;flex-shrink:0;margin-top:6px"></div>' : ''}
+        </div>`;
+    }).join('');
+}
+
+function handleNotifClick(postId) {
+    closeNotifications();
+    if (!postId) return;
+    navigateTo('timeline');
+    setTimeout(() => {
+        const el = document.querySelector(`.post-card[data-id="${postId}"]`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.style.transition = 'box-shadow .3s';
+            el.style.boxShadow  = '0 0 0 3px var(--accent)';
+            setTimeout(() => el.style.boxShadow = '', 2000);
+        }
+    }, 300);
+}
+
+async function createNotification(type, postId, postOwnerId, actorName, message) {
+    if (!postOwnerId || postOwnerId === currentUser?.id) return; // لا إشعار لنفسك
+    await db.from('notifications').insert({
+        user_id:    postOwnerId,
+        actor_id:   currentUser.id,
+        actor_name: actorName,
+        type,
+        post_id:    postId,
+        message,
+        is_read:    false,
+    });
+}
+
+function startNotificationsRealtime() {
+    if (!currentUser) return;
+    const ch = db.channel(`notif-${currentUser.id}`)
+        .on('postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'notifications',
+              filter: `user_id=eq.${currentUser.id}` },
+            (payload) => {
+                notificationsCache.unshift(payload.new);
+                unreadCount++;
+                updateNotifBadge();
+                // نبضة على الجرس
+                document.querySelectorAll('.notif-bell').forEach(b => {
+                    b.classList.add('bell-ring');
+                    setTimeout(() => b.classList.remove('bell-ring'), 600);
+                });
+            }
+        )
+        .subscribe();
+    realtimeChannels.push(ch);
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // REALTIME — Supabase channels للتحديث الفوري
 // ══════════════════════════════════════════════════════════════════════════════
@@ -999,6 +1320,538 @@ function startCommentsRealtime(postId) {
 function stopRealtime() {
     realtimeChannels.forEach(ch => db.removeChannel(ch));
     realtimeChannels = [];
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PUBLIC PROFILE
+// ══════════════════════════════════════════════════════════════════════════════
+
+let publicProfileUserId = null;
+
+function openPublicProfile(userId, userName) {
+    if (!userId) return;
+    publicProfileUserId = userId;
+    const modal = document.getElementById('public-profile-modal');
+    if (!modal) return;
+
+    // header placeholder
+    const color   = getColor(userName);
+    const initial = getInitial(userName);
+    document.getElementById('pp-avatar').style.background = color;
+    document.getElementById('pp-avatar').textContent      = initial;
+    document.getElementById('pp-name').textContent        = userName;
+    document.getElementById('pp-posts-count').textContent = '...';
+    document.getElementById('pp-votes-count').textContent = '...';
+    document.getElementById('pp-posts-list').innerHTML    =
+        '<div style="text-align:center;padding:24px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    loadPublicProfilePosts(userId);
+}
+
+async function loadPublicProfilePosts(userId) {
+    const { data, error } = await db.from('posts')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+    if (error || !data) return;
+
+    const totalVotes = data.reduce((s, p) => s + (p.upvotes || 0), 0);
+    document.getElementById('pp-posts-count').textContent = fmtNum(data.length);
+    document.getElementById('pp-votes-count').textContent = fmtNum(totalVotes);
+
+    const listEl = document.getElementById('pp-posts-list');
+    if (!data.length) {
+        listEl.innerHTML = '<p style="text-align:center;color:var(--muted);padding:24px;font-size:.85rem">لا توجد منشورات بعد</p>';
+        return;
+    }
+    listEl.innerHTML = data.map(p => {
+        const net = (p.upvotes||0) - (p.downvotes||0);
+        return `<div style="padding:14px 0;border-bottom:1px solid var(--border)">
+            <p style="font-size:.86rem;line-height:1.65;color:#2a2a2a;margin:0 0 8px;white-space:pre-wrap">${esc(p.content)}</p>
+            <div style="display:flex;align-items:center;gap:12px">
+                <span style="font-size:.72rem;color:var(--muted)">${fmtDate(p.created_at)}</span>
+                <span style="font-size:.75rem;color:#22c55e;font-weight:700">
+                    <i class="fa-solid fa-arrow-up"></i> ${p.upvotes||0}
+                </span>
+                <span style="font-size:.75rem;color:var(--muted);font-weight:700">
+                    <i class="fa-regular fa-comment"></i> ${p.comment_count||0}
+                </span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function closePublicProfile() {
+    document.getElementById('public-profile-modal')?.classList.add('hidden');
+    document.body.style.overflow = '';
+    publicProfileUserId = null;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SEARCH
+// ══════════════════════════════════════════════════════════════════════════════
+
+let searchDebounceTimer = null;
+
+function openSearch() {
+    document.getElementById('search-modal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => document.getElementById('search-input')?.focus(), 80);
+}
+
+function closeSearch() {
+    document.getElementById('search-modal').classList.add('hidden');
+    document.body.style.overflow = '';
+    document.getElementById('search-input').value = '';
+    document.getElementById('search-results').innerHTML = '';
+}
+
+function onSearchInput(val) {
+    clearTimeout(searchDebounceTimer);
+    const q = val.trim();
+    if (!q) { document.getElementById('search-results').innerHTML = ''; return; }
+    document.getElementById('search-results').innerHTML =
+        '<div style="text-align:center;padding:20px;color:var(--muted);font-size:.85rem"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+    searchDebounceTimer = setTimeout(() => runSearch(q), 350);
+}
+
+async function runSearch(q) {
+    const qLower = q.toLowerCase();
+
+    // بحث في البوستات (local cache أسرع)
+    const postResults = allPostsCache
+        .filter(p => p.content?.toLowerCase().includes(qLower) || p.author_name?.toLowerCase().includes(qLower))
+        .slice(0, 8);
+
+    // بحث في المستخدمين من DB
+    const { data: users } = await db.from('profiles')
+        .select('id, first_name, last_name')
+        .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`)
+        .limit(5);
+
+    const el = document.getElementById('search-results');
+    if (!el) return;
+
+    let html = '';
+
+    if (users?.length) {
+        html += `<div class="section-label" style="padding:0 16px;margin-top:16px">أشخاص</div>`;
+        html += users.map(u => {
+            const name = `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'مستخدم';
+            return `<div class="search-result-item" onclick="openPublicProfile('${u.id}','${esc(name)}')">
+                <div class="avatar av-sm" style="background:${getColor(name)}">${getInitial(name)}</div>
+                <span style="font-size:.88rem;font-weight:700;color:var(--dark)">${esc(name)}</span>
+            </div>`;
+        }).join('');
+    }
+
+    if (postResults.length) {
+        html += `<div class="section-label" style="padding:0 16px;margin-top:16px">منشورات</div>`;
+        html += postResults.map(p => {
+            const snippet = p.content.length > 90 ? p.content.slice(0, 90) + '...' : p.content;
+            return `<div class="search-result-item" onclick="closeSearch();scrollToPost(${p.id})">
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:.78rem;font-weight:800;color:var(--muted);margin-bottom:3px">${esc(p.author_name)}</div>
+                    <div style="font-size:.85rem;color:var(--dark);line-height:1.5">${esc(snippet)}</div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    if (!html) {
+        html = `<div style="text-align:center;padding:32px 16px">
+            <div style="font-size:1.8rem;margin-bottom:8px">🔍</div>
+            <p style="color:var(--muted);font-size:.85rem">لا نتائج لـ "${esc(q)}"</p>
+        </div>`;
+    }
+
+    el.innerHTML = html;
+}
+
+function scrollToPost(postId) {
+    navigateTo('timeline');
+    setTimeout(() => {
+        const el = document.querySelector(`.post-card[data-id="${postId}"]`);
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.style.outline = '2px solid var(--accent)'; setTimeout(() => el.style.outline = '', 1500); }
+    }, 200);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PUBLIC PROFILE + FOLLOW
+// ══════════════════════════════════════════════════════════════════════════════
+
+let publicProfileUserId = null;
+
+async function openPublicProfile(userId, name) {
+    if (userId === currentUser?.id) { closeSearch(); navigateTo('profile'); return; }
+    publicProfileUserId = userId;
+    closeSearch();
+
+    const modal = document.getElementById('public-profile-modal');
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    // Reset
+    document.getElementById('pp-name').textContent       = name || '...';
+    document.getElementById('pp-avatar').textContent     = getInitial(name || '?');
+    document.getElementById('pp-avatar').style.background = getColor(name || '?');
+    document.getElementById('pp-posts-count').textContent = '—';
+    document.getElementById('pp-votes-count').textContent  = '—';
+    document.getElementById('pp-posts-list').innerHTML    =
+        '<div style="text-align:center;padding:20px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+
+    // جلب بوستات المستخدم
+    const { data: posts } = await db.from('posts')
+        .select('*').eq('user_id', userId)
+        .order('created_at', { ascending: false }).limit(20);
+
+    const userPosts   = posts || [];
+    const totalVotes  = userPosts.reduce((s, p) => s + (p.upvotes || 0), 0);
+    document.getElementById('pp-posts-count').textContent = userPosts.length;
+    document.getElementById('pp-votes-count').textContent  = fmtNum(totalVotes);
+
+    const listEl = document.getElementById('pp-posts-list');
+    if (!userPosts.length) {
+        listEl.innerHTML = '<p style="text-align:center;color:var(--muted);padding:24px;font-size:.88rem">لا توجد منشورات</p>';
+    } else {
+        listEl.innerHTML = userPosts.map(p => `
+            <div style="padding:14px 0;border-bottom:1px solid var(--border)">
+                <p style="font-size:.87rem;line-height:1.65;color:#2a2a2a;margin:0 0 8px;white-space:pre-wrap">${esc(p.content.length>120?p.content.slice(0,120)+'...':p.content)}</p>
+                <div style="display:flex;gap:12px;align-items:center">
+                    <span style="font-size:.72rem;color:var(--muted)">${fmtDate(p.created_at)}</span>
+                    <span style="font-size:.75rem;color:#22c55e;font-weight:700"><i class="fa-solid fa-arrow-up"></i> ${p.upvotes||0}</span>
+                    <span style="font-size:.75rem;color:var(--muted);font-weight:700"><i class="fa-regular fa-comment"></i> ${p.comment_count||0}</span>
+                </div>
+            </div>`).join('');
+    }
+
+    // حالة المتابعة
+    await refreshFollowBtn(userId);
+}
+
+function closePublicProfile() {
+    document.getElementById('public-profile-modal').classList.add('hidden');
+    document.body.style.overflow = '';
+    publicProfileUserId = null;
+}
+
+async function refreshFollowBtn(userId) {
+    const btn = document.getElementById('pp-follow-btn');
+    if (!btn || !currentUser) { if (btn) { btn.textContent = 'تسجيل الدخول للمتابعة'; btn.disabled = true; } return; }
+
+    const { data } = await db.from('follows')
+        .select('id').eq('follower_id', currentUser.id).eq('following_id', userId).maybeSingle();
+
+    const isFollowing = !!data;
+    btn.disabled = false;
+    btn.innerHTML = isFollowing
+        ? '<i class="fa-solid fa-user-check"></i> تتابعه'
+        : '<i class="fa-solid fa-user-plus"></i> متابعة';
+    btn.className = isFollowing ? 'btn btn-ghost' : 'btn btn-primary';
+    btn.style.cssText = 'padding:9px 20px;font-size:.82rem';
+    btn.onclick = () => toggleFollow(userId, isFollowing);
+}
+
+async function toggleFollow(userId, isFollowing) {
+    if (!currentUser) { openAuthModal(); return; }
+    const btn = document.getElementById('pp-follow-btn');
+    if (btn) btn.disabled = true;
+
+    if (isFollowing) {
+        await db.from('follows').delete()
+            .eq('follower_id', currentUser.id).eq('following_id', userId);
+        toast('تم إلغاء المتابعة', 'info');
+    } else {
+        await db.from('follows').insert({ follower_id: currentUser.id, following_id: userId });
+        toast('تمت المتابعة ✅', 'success');
+        // إرسال إشعار للمستخدم الآخر
+        const myName = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'شخص';
+        await createNotification(userId, 'follow', `${myName} بدأ بمتابعتك`, null);
+    }
+    await refreshFollowBtn(userId);
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PUBLIC PROFILE
+// ══════════════════════════════════════════════════════════════════════════════
+
+let publicProfileUserId = null;
+
+function openPublicProfile(userId, userName) {
+    if (!userId) return;
+    publicProfileUserId = userId;
+    const modal = document.getElementById('public-profile-modal');
+    if (!modal) return;
+
+    // header placeholder
+    const color   = getColor(userName);
+    const initial = getInitial(userName);
+    document.getElementById('pp-avatar').style.background = color;
+    document.getElementById('pp-avatar').textContent      = initial;
+    document.getElementById('pp-name').textContent        = userName;
+    document.getElementById('pp-posts-count').textContent = '...';
+    document.getElementById('pp-votes-count').textContent = '...';
+    document.getElementById('pp-posts-list').innerHTML    =
+        '<div style="text-align:center;padding:24px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    loadPublicProfilePosts(userId);
+}
+
+async function loadPublicProfilePosts(userId) {
+    const { data, error } = await db.from('posts')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+    if (error || !data) return;
+
+    const totalVotes = data.reduce((s, p) => s + (p.upvotes || 0), 0);
+    document.getElementById('pp-posts-count').textContent = fmtNum(data.length);
+    document.getElementById('pp-votes-count').textContent = fmtNum(totalVotes);
+
+    const listEl = document.getElementById('pp-posts-list');
+    if (!data.length) {
+        listEl.innerHTML = '<p style="text-align:center;color:var(--muted);padding:24px;font-size:.85rem">لا توجد منشورات بعد</p>';
+        return;
+    }
+    listEl.innerHTML = data.map(p => {
+        const net = (p.upvotes||0) - (p.downvotes||0);
+        return `<div style="padding:14px 0;border-bottom:1px solid var(--border)">
+            <p style="font-size:.86rem;line-height:1.65;color:#2a2a2a;margin:0 0 8px;white-space:pre-wrap">${esc(p.content)}</p>
+            <div style="display:flex;align-items:center;gap:12px">
+                <span style="font-size:.72rem;color:var(--muted)">${fmtDate(p.created_at)}</span>
+                <span style="font-size:.75rem;color:#22c55e;font-weight:700">
+                    <i class="fa-solid fa-arrow-up"></i> ${p.upvotes||0}
+                </span>
+                <span style="font-size:.75rem;color:var(--muted);font-weight:700">
+                    <i class="fa-regular fa-comment"></i> ${p.comment_count||0}
+                </span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function closePublicProfile() {
+    document.getElementById('public-profile-modal')?.classList.add('hidden');
+    document.body.style.overflow = '';
+    publicProfileUserId = null;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SEARCH
+// ══════════════════════════════════════════════════════════════════════════════
+
+let searchTimeout = null;
+
+function openSearch() {
+    const modal = document.getElementById('search-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => document.getElementById('search-input')?.focus(), 100);
+    renderSearchResults('');
+}
+
+function closeSearch() {
+    document.getElementById('search-modal')?.classList.add('hidden');
+    document.body.style.overflow = '';
+    const inp = document.getElementById('search-input');
+    if (inp) inp.value = '';
+}
+
+function onSearchInput(val) {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => renderSearchResults(val.trim()), 200);
+}
+
+function renderSearchResults(q) {
+    const container = document.getElementById('search-results');
+    if (!container) return;
+
+    if (!q) {
+        // عرض المنشورات الأحدث كـ suggestions
+        const recent = allPostsCache.slice(0, 5);
+        if (!recent.length) {
+            container.innerHTML = `<p style="text-align:center;color:var(--muted);padding:32px;font-size:.85rem">ابدأ الكتابة للبحث...</p>`;
+            return;
+        }
+        container.innerHTML = `<div style="padding:10px 16px 6px"><span style="font-size:.68rem;font-weight:800;color:var(--muted);letter-spacing:1px;text-transform:uppercase">الأحدث</span></div>`
+            + recent.map(p => searchResultCard(p)).join('');
+        return;
+    }
+
+    const lower = q.toLowerCase();
+    const results = allPostsCache.filter(p =>
+        p.content?.toLowerCase().includes(lower) ||
+        p.author_name?.toLowerCase().includes(lower)
+    );
+
+    if (!results.length) {
+        container.innerHTML = `<div style="text-align:center;padding:40px 20px">
+            <div style="font-size:2rem;margin-bottom:8px">🔍</div>
+            <p style="color:var(--muted);font-size:.85rem">لا نتائج لـ "${esc(q)}"</p>
+        </div>`;
+        return;
+    }
+
+    container.innerHTML = `<div style="padding:10px 16px 6px"><span style="font-size:.68rem;font-weight:800;color:var(--muted);letter-spacing:1px">${results.length} نتيجة</span></div>`
+        + results.slice(0, 20).map(p => searchResultCard(p)).join('');
+}
+
+function searchResultCard(p) {
+    const name = p.author_name || 'مجهول';
+    const preview = p.content.length > 90 ? p.content.slice(0, 90) + '...' : p.content;
+    return `<div onclick="goToPost(${p.id})" style="display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s"
+                 onmouseenter="this.style.background='#f7f4ef'" onmouseleave="this.style.background=''">
+        ${avatar(name, 'av-sm')}
+        <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+                <span style="font-size:.8rem;font-weight:800;color:var(--dark)">${esc(name)}</span>
+                <span style="font-size:.7rem;color:var(--muted)">${fmtDate(p.created_at)}</span>
+            </div>
+            <p style="font-size:.82rem;color:#444;margin:0;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(preview)}</p>
+        </div>
+    </div>`;
+}
+
+function goToPost(postId) {
+    closeSearch();
+    navigateTo('timeline');
+    setTimeout(() => {
+        const el = document.querySelector(`.post-card[data-id="${postId}"]`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.style.transition = 'box-shadow .3s';
+            el.style.boxShadow  = '0 0 0 3px var(--accent)';
+            setTimeout(() => el.style.boxShadow = '', 2000);
+        }
+    }, 300);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+let notifUnread = 0;
+
+async function createNotification(toUserId, type, body, postId = null) {
+    if (!toUserId || toUserId === currentUser?.id) return;
+    await db.from('notifications').insert({
+        user_id:  toUserId,
+        type,
+        body,
+        post_id:  postId,
+        is_read:  false,
+    }).then(() => {}).catch(() => {});
+}
+
+async function fetchNotifications() {
+    if (!currentUser) return;
+    const { data } = await db.from('notifications')
+        .select('*').eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false }).limit(30);
+
+    renderNotifications(data || []);
+    notifUnread = (data || []).filter(n => !n.is_read).length;
+    updateNotifBadge();
+}
+
+function updateNotifBadge() {
+    const badge = document.getElementById('notif-badge');
+    if (!badge) return;
+    if (notifUnread > 0) {
+        badge.textContent = notifUnread > 9 ? '9+' : notifUnread;
+        badge.classList.remove('hidden');
+    } else {
+        badge.classList.add('hidden');
+    }
+}
+
+function renderNotifications(notifs) {
+    const list = document.getElementById('notif-list');
+    if (!list) return;
+
+    if (!notifs.length) {
+        list.innerHTML = `<div style="text-align:center;padding:40px 16px">
+            <div style="font-size:2rem;margin-bottom:8px">🔔</div>
+            <p style="color:var(--muted);font-size:.85rem">لا توجد إشعارات بعد</p>
+        </div>`;
+        return;
+    }
+
+    list.innerHTML = notifs.map(n => {
+        const icon = n.type === 'follow' ? 'fa-user-plus' : n.type === 'comment' ? 'fa-comment' : 'fa-arrow-up';
+        const color = n.type === 'follow' ? '#8b5cf6' : n.type === 'comment' ? '#3b82f6' : '#22c55e';
+        return `<div class="notif-item ${n.is_read ? '' : 'notif-unread'}" onclick="handleNotifClick('${n.id}','${n.post_id||''}')">
+            <div style="width:36px;height:36px;border-radius:50%;background:${color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                <i class="fa-solid ${icon}" style="color:${color};font-size:.85rem"></i>
+            </div>
+            <div style="flex:1;min-width:0">
+                <p style="font-size:.85rem;color:var(--dark);margin:0 0 3px;line-height:1.4">${esc(n.body)}</p>
+                <span style="font-size:.72rem;color:var(--muted)">${fmtDate(n.created_at)}</span>
+            </div>
+            ${!n.is_read ? '<div style="width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-top:4px"></div>' : ''}
+        </div>`;
+    }).join('');
+}
+
+async function handleNotifClick(notifId, postId) {
+    // تعليم كمقروء
+    await db.from('notifications').update({ is_read: true }).eq('id', notifId);
+    closeNotifications();
+    if (postId) scrollToPost(Number(postId));
+    fetchNotifications();
+}
+
+function openNotifications() {
+    if (!currentUser) { openAuthModal(); return; }
+    document.getElementById('notif-modal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    fetchNotifications();
+    // علّم كلهم مقروءين بعد ثانيتين
+    setTimeout(async () => {
+        if (!currentUser) return;
+        await db.from('notifications').update({ is_read: true })
+            .eq('user_id', currentUser.id).eq('is_read', false);
+        notifUnread = 0;
+        updateNotifBadge();
+    }, 2000);
+}
+
+function closeNotifications() {
+    document.getElementById('notif-modal').classList.add('hidden');
+    document.body.style.overflow = '';
+}
+
+function startNotifRealtime() {
+    if (!currentUser) return;
+    const ch = db.channel(`notif-${currentUser.id}`)
+        .on('postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}` },
+            (payload) => {
+                notifUnread++;
+                updateNotifBadge();
+                toast(payload.new.body, 'info');
+                // لو المودال مفتوح نحدث القائمة
+                if (!document.getElementById('notif-modal').classList.contains('hidden')) {
+                    fetchNotifications();
+                }
+            }
+        ).subscribe();
+    realtimeChannels.push(ch);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1119,6 +1972,14 @@ async function submitComment() {
 
     if (error) { toast('فشل إرسال التعليق', 'error'); return; }
 
+    // إشعار صاحب البوست
+    const commentedPost = allPostsCache.find(p => p.id === activeCommentsPostId);
+    if (commentedPost && commentedPost.user_id !== currentUser.id) {
+        const actorN = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم';
+        createNotification('comment', commentedPost.id, commentedPost.user_id, actorN,
+            `علّق على منشورك: "${content.slice(0,40)}${content.length>40?'...':''}"`);
+    }
+
     inp.value = '';
     inp.style.height = 'auto';
 
@@ -1185,6 +2046,9 @@ Object.assign(window, {
     toggleMic, raiseHand,
     handleVote,
     openComments, closeComments, submitComment, deleteComment,
+    openSearch, closeSearch, onSearchInput, goToPost,
+    openPublicProfile, closePublicProfile,
+    openNotifications, closeNotifications, handleNotifClick,
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1196,6 +2060,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateUIForAuth();
     fetchPosts();
     startRealtime();
+    fetchNotifications();
+    startNotificationsRealtime();
+    if (currentUser) { startNotifRealtime(); fetchNotifications(); }
 
     // ربط زر النشر (بدون onclick في HTML)
     const postBtn = document.getElementById('post-submit-btn');
@@ -1207,12 +2074,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // التعامل مع زر Esc
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
-            if (!document.getElementById('comments-modal')?.classList.contains('hidden'))
-                closeComments();
-            if (!document.getElementById('create-room-modal')?.classList.contains('hidden'))
-                hideCreateRoomModal();
-            if (!document.getElementById('auth-modal')?.classList.contains('hidden'))
-                closeAuthModal();
+            if (!document.getElementById('search-modal')?.classList.contains('hidden'))       { closeSearch(); return; }
+            if (!document.getElementById('public-profile-modal')?.classList.contains('hidden')) { closePublicProfile(); return; }
+            if (!document.getElementById('notif-modal')?.classList.contains('hidden'))        { closeNotifications(); return; }
+            if (!document.getElementById('comments-modal')?.classList.contains('hidden'))     { closeComments(); return; }
+            if (!document.getElementById('create-room-modal')?.classList.contains('hidden'))  { hideCreateRoomModal(); return; }
+            if (!document.getElementById('auth-modal')?.classList.contains('hidden'))         { closeAuthModal(); return; }
         }
     });
 });
