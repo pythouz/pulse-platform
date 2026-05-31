@@ -17,6 +17,12 @@ let currentRoomHostId  = null;
 let isCurrentUserHost  = false;
 let scrollY            = 0;
 
+// ── Infinite Scroll State ──
+let isFetchingMore  = false;
+let hasMorePosts    = true;
+let currentOffset   = 0;
+const PAGE_SIZE     = 20;
+
 // ── Avatar color palette ──
 const COLORS = ['#6366f1','#8b5cf6','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#14b8a6','#f97316','#06b6d4'];
 const getColor   = s => COLORS[Math.abs(Array.from(s||'A').reduce((a,c)=>a+c.charCodeAt(0),0))%COLORS.length];
@@ -234,27 +240,110 @@ function updateUIForAuth() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function fetchPosts() {
+    // إعادة ضبط pagination
+    currentOffset = 0;
+    hasMorePosts  = true;
     showSkeletons(4);
+
     const { data, error } = await db.from('posts')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(80);
+        .range(0, PAGE_SIZE - 1);
+
     if (error) { console.error('fetchPosts:', error); return; }
     allPostsCache = data || [];
+    hasMorePosts  = data?.length === PAGE_SIZE;
 
     // جلب تصويتات المستخدم الحالي لتلوين الأسهم
-    userVotesCache = {};
-    if (currentUser) {
-        const postIds = allPostsCache.map(p => p.id);
-        const { data: votes } = await db.from('post_votes')
-            .select('post_id, vote_type')
-            .eq('user_id', currentUser.id)
-            .in('post_id', postIds);
-        (votes || []).forEach(v => { userVotesCache[v.post_id] = v.vote_type; });
-    }
+    await loadUserVotes(allPostsCache.map(p => p.id));
 
     renderTimeline();
     updateStats();
+}
+
+async function loadMorePosts() {
+    if (isFetchingMore || !hasMorePosts) return;
+    isFetchingMore = true;
+
+    // أظهر مؤشر تحميل
+    const sentinel = document.getElementById('scroll-sentinel');
+    if (sentinel) sentinel.innerHTML =
+        '<div style="text-align:center;padding:16px;color:var(--muted);font-size:.82rem"><i class="fa-solid fa-spinner fa-spin"></i> تحميل المزيد...</div>';
+
+    currentOffset += PAGE_SIZE;
+    const { data, error } = await db.from('posts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(currentOffset, currentOffset + PAGE_SIZE - 1);
+
+    isFetchingMore = false;
+
+    if (error || !data?.length) {
+        hasMorePosts = false;
+        if (sentinel) sentinel.innerHTML =
+            '<div style="text-align:center;padding:16px;color:var(--muted);font-size:.78rem">لا توجد منشورات أخرى</div>';
+        return;
+    }
+
+    hasMorePosts = data.length === PAGE_SIZE;
+
+    // جلب تصويتات للمنشورات الجديدة
+    await loadUserVotes(data.map(p => p.id));
+
+    // إضافة للكاش
+    allPostsCache = [...allPostsCache, ...data];
+
+    // إضافة للـ DOM مباشرة بدون إعادة رندر
+    const container = document.getElementById('posts-container');
+    if (container && sentinel) {
+        const fragment = document.createDocumentFragment();
+        data.forEach((post, idx) => {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = postCard(post, false);
+            const el = tmp.firstElementChild;
+            el.style.opacity   = '0';
+            el.style.transform = 'translateY(12px)';
+            fragment.appendChild(el);
+        });
+        container.insertBefore(fragment, sentinel);
+        // Animate them in
+        const newCards = container.querySelectorAll('.post-card[style*="opacity: 0"]');
+        newCards.forEach((card, i) => {
+            setTimeout(() => {
+                card.style.transition = 'opacity .3s, transform .3s';
+                card.style.opacity    = '1';
+                card.style.transform  = 'translateY(0)';
+            }, i * 40);
+        });
+        bindVoteEvents();
+    }
+
+    if (!hasMorePosts && sentinel) {
+        sentinel.innerHTML =
+            '<div style="text-align:center;padding:16px;color:var(--muted);font-size:.78rem">وصلت لآخر المنشورات ✓</div>';
+    } else if (sentinel) {
+        sentinel.innerHTML = '';
+    }
+}
+
+async function loadUserVotes(postIds) {
+    if (!currentUser || !postIds.length) return;
+    const { data: votes } = await db.from('post_votes')
+        .select('post_id, vote_type')
+        .eq('user_id', currentUser.id)
+        .in('post_id', postIds);
+    (votes || []).forEach(v => { userVotesCache[v.post_id] = v.vote_type; });
+}
+
+function initInfiniteScroll() {
+    const sentinel = document.getElementById('scroll-sentinel');
+    if (!sentinel) return;
+    const observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && currentTab === 'latest') {
+            loadMorePosts();
+        }
+    }, { rootMargin: '200px' });
+    observer.observe(sentinel);
 }
 
 function switchTab(tab) {
@@ -362,6 +451,10 @@ function postCard(post, isTopPost = false) {
                     <button class="reaction-btn comment-btn" data-id="${post.id}" onclick="openComments(${post.id})">
                         <i class="fa-regular fa-comment"></i>
                         <span class="comment-count-${post.id}">${fmtNum(post.comment_count||0)}</span>
+                    </button>
+                    <button class="reaction-btn" onclick="sharePost(${post.id}, '${esc(post.content).replace(/'/g,'\'').replace(/
+/g,' ')}')" style="margin-right:auto" title="مشاركة">
+                        <i class="fa-solid fa-share-nodes"></i>
                     </button>
                     <span class="net-score" style="display:none">${netSign}${net}</span>
                 </div>
@@ -1531,6 +1624,56 @@ async function deleteComment(commentId) {
     if (error) { toast('فشل حذف التعليق', 'error'); loadComments(activeCommentsPostId); }
 }
 
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SHARE POST
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function sharePost(postId, content) {
+    const url  = `${location.origin}${location.pathname}?post=${postId}`;
+    const text = content.length > 100 ? content.slice(0, 100) + '...' : content;
+
+    if (navigator.share) {
+        try {
+            await navigator.share({ title: 'Elite', text, url });
+            return;
+        } catch(e) { /* user cancelled */ return; }
+    }
+    // Fallback: copy to clipboard
+    try {
+        await navigator.clipboard.writeText(url);
+        toast('تم نسخ الرابط 🔗', 'success');
+    } catch(e) {
+        toast('الرابط: ' + url, 'info');
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DARK MODE
+// ══════════════════════════════════════════════════════════════════════════════
+
+function initDarkMode() {
+    const saved = localStorage.getItem('elite-theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const isDark = saved ? saved === 'dark' : prefersDark;
+    applyTheme(isDark);
+}
+
+function toggleDarkMode() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    applyTheme(!isDark);
+    localStorage.setItem('elite-theme', !isDark ? 'dark' : 'light');
+}
+
+function applyTheme(dark) {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    // تحديث أيقونة الزر
+    document.querySelectorAll('.theme-toggle-icon').forEach(el => {
+        el.className = `fa-solid ${dark ? 'fa-sun' : 'fa-moon'} theme-toggle-icon`;
+    });
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // GLOBAL EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1546,17 +1689,20 @@ Object.assign(window, {
     openSearch, closeSearch, onSearchInput, goToPost,
     openPublicProfile, closePublicProfile,
     openNotifications, closeNotifications, handleNotifClick,
+    toggleDarkMode, sharePost,
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BOOT
 // ══════════════════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
+    initDarkMode();
     const { data: { session } } = await db.auth.getSession();
     currentUser = session?.user ?? null;
     updateUIForAuth();
     fetchPosts();
     startRealtime();
+    initInfiniteScroll();
     if (currentUser) {
         fetchNotifications();
         startNotificationsRealtime();
@@ -1568,6 +1714,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ربط أحداث التصويت
     bindVoteEvents();
+
+    // فتح بوست محدد عبر URL param
+    const urlPost = new URLSearchParams(location.search).get('post');
+    if (urlPost) {
+        setTimeout(() => {
+            const el = document.querySelector(`.post-card[data-id="${urlPost}"]`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.style.transition = 'box-shadow .3s';
+                el.style.boxShadow  = '0 0 0 3px var(--accent)';
+                setTimeout(() => el.style.boxShadow = '', 2500);
+            }
+        }, 800);
+    }
 
     // التعامل مع زر Esc
     document.addEventListener('keydown', e => {
