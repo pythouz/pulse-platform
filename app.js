@@ -4,7 +4,27 @@
 
 const SUPABASE_URL      = 'https://jnwqokkzywrctdjsdzbl.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impud3Fva2t6eXdyY3RkanNkemJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4MTkxOTYsImV4cCI6MjA5NTM5NTE5Nn0.8RkJ2A1oJ9DaSD0Y8CdiNwvcfcr7iWyQZf5eKD3kpAo';
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ── Custom storage مع fallback لـ sessionStorage على Safari/iOS ──
+const _storage = (() => {
+    try {
+        localStorage.setItem('_elite_test', '1');
+        localStorage.removeItem('_elite_test');
+        return localStorage;
+    } catch (e) {
+        return sessionStorage;
+    }
+})();
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+        storage:             _storage,
+        persistSession:      true,
+        autoRefreshToken:    true,
+        detectSessionInUrl:  true,
+        storageKey:          'elite-auth-token',
+    },
+});
 
 // ── State ──
 let currentUser        = null;
@@ -197,14 +217,15 @@ db.auth.onAuthStateChange((event, session) => {
     currentUser = session?.user ?? null;
     updateUIForAuth();
 
-    if (event === 'SIGNED_IN') {
-        // لو الـ boot خلص بالفعل — ده login جديد من المستخدم
+    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         if (bootComplete) {
-            fetchPosts();
-            fetchNotifications();
-            startNotificationsRealtime();
+            if (event === 'SIGNED_IN') {
+                fetchPosts();
+                fetchNotifications();
+                startNotificationsRealtime();
+            }
+            // TOKEN_REFRESHED — الـ UI بيتحدث تلقائياً بـ updateUIForAuth فوق
         }
-        // لو الـ boot لسه مش خلص — هو هيعمل fetchPosts بنفسه
     } else if (event === 'SIGNED_OUT') {
         stopRealtime();
         allPostsCache   = [];
@@ -633,23 +654,37 @@ function voteClickHandler(event) {
 }
 
 async function createPost() {
-    if (!currentUser) return openAuthModal();
+    // تحقق من الـ session أولاً — ممكن تكون انتهت على الموبايل
+    const { data: { session } } = await db.auth.getSession();
+    currentUser = session?.user ?? null;
+    if (!currentUser) { updateUIForAuth(); return openAuthModal(); }
+
     const ta      = document.getElementById('post-textarea');
-    const content = ta?.value?.trim();
-    if (!content) return toast('اكتب شيئاً أولاً!', 'error');
+    const postContent = ta?.value?.trim();
+    if (!postContent) return toast('اكتب شيئاً أولاً!', 'error');
     const btn = document.getElementById('post-submit-btn');
     if (btn) { btn.disabled = true; btn.textContent = '...'; }
 
     const name = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم';
     const { error } = await db.from('posts').insert({
-        content,
+        content:     postContent,
         user_id:     currentUser.id,
         author_name: name,
         upvotes:     0,
         downvotes:   0,
     });
     if (btn) { btn.disabled = false; btn.innerHTML = 'نشر <i class="fa-solid fa-paper-plane"></i>'; }
-    if (error) return toast('فشل النشر: ' + error.message, 'error');
+    if (error) {
+        if (error.message?.includes('JWT') || error.message?.includes('token') || error.code === 'PGRST301') {
+            toast('انتهت الجلسة — سجّل دخولك مرة أخرى', 'error');
+            currentUser = null;
+            updateUIForAuth();
+            openAuthModal();
+        } else {
+            toast('فشل النشر: ' + error.message, 'error');
+        }
+        return;
+    }
     ta.value = '';
     toast('تم النشر! ✅', 'success');
     fetchPosts();
