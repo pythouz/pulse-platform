@@ -23,6 +23,9 @@ let hasMorePosts    = true;
 let currentOffset   = 0;
 const PAGE_SIZE     = 20;
 
+// ── Boot flag ──
+let bootComplete = false;
+
 // ── Avatar color palette ──
 const COLORS = ['#6366f1','#8b5cf6','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#14b8a6','#f97316','#06b6d4'];
 const getColor   = s => COLORS[Math.abs(Array.from(s||'A').reduce((a,c)=>a+c.charCodeAt(0),0))%COLORS.length];
@@ -186,14 +189,21 @@ async function handleLogout() {
 db.auth.onAuthStateChange((event, session) => {
     currentUser = session?.user ?? null;
     updateUIForAuth();
+
     if (event === 'SIGNED_IN') {
-        fetchPosts();
-        fetchNotifications();
-        startNotificationsRealtime();
-        startRealtime();
+        // لو الـ boot خلص بالفعل — ده login جديد من المستخدم
+        if (bootComplete) {
+            fetchPosts();
+            fetchNotifications();
+            startNotificationsRealtime();
+        }
+        // لو الـ boot لسه مش خلص — هو هيعمل fetchPosts بنفسه
     } else if (event === 'SIGNED_OUT') {
-        allPostsCache  = [];
+        stopRealtime();
+        allPostsCache   = [];
+        userVotesCache  = {};
         renderTimeline();
+        updateNotifBadge();
     }
 });
 
@@ -1740,4 +1750,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!document.getElementById('auth-modal')?.classList.contains('hidden'))         { closeAuthModal(); return; }
         }
     });
+
+    // الـ boot خلص — دلوقتي onAuthStateChange يقدر يشغّل fetchPosts لما المستخدم يسجل دخول
+    bootComplete = true;
 });
