@@ -26,6 +26,13 @@ const PAGE_SIZE     = 20;
 // ── Boot flag ──
 let bootComplete = false;
 
+// ── Notifications State ──
+let notificationsCache = [];
+let unreadCount        = 0;
+
+// ── Realtime State ──
+let realtimeChannels = [];
+
 // ── Avatar color palette ──
 const COLORS = ['#6366f1','#8b5cf6','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#14b8a6','#f97316','#06b6d4'];
 const getColor   = s => COLORS[Math.abs(Array.from(s||'A').reduce((a,c)=>a+c.charCodeAt(0),0))%COLORS.length];
@@ -1207,9 +1214,6 @@ function goToPost(postId) {
 // NOTIFICATIONS
 // ══════════════════════════════════════════════════════════════════════════════
 
-let notificationsCache = [];
-let unreadCount        = 0;
-
 async function fetchNotifications() {
     if (!currentUser) return;
     const { data } = await db.from('notifications')
@@ -1337,8 +1341,6 @@ function startNotificationsRealtime() {
 // ══════════════════════════════════════════════════════════════════════════════
 // REALTIME — Supabase channels للتحديث الفوري
 // ══════════════════════════════════════════════════════════════════════════════
-
-let realtimeChannels = [];
 
 function startRealtime() {
     stopRealtime(); // cleanup أي channels قديمة
