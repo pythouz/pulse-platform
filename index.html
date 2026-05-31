@@ -3,7 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pulse — منصة المجتمع الحي</title>
+    <meta name="theme-color" content="#FF4D00">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Elite">
+    <title>Elite — منصة المجتمع الحي</title>
+    <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -20,7 +25,39 @@
             --muted: #9CA3AF;
             --border: #EBEBEB;
             --room-bg: #0D0D1A;
+            --input-bg: #fafafa;
+            --text-body: #2a2a2a;
         }
+
+        /* ── Dark Mode ── */
+        [data-theme="dark"] {
+            --bg:       #0f0f13;
+            --card:     #1a1a22;
+            --dark:     #f0f0f0;
+            --muted:    #6b7280;
+            --border:   #2a2a36;
+            --input-bg: #22222e;
+            --text-body:#d1d5db;
+        }
+        [data-theme="dark"] body              { background: var(--bg); color: var(--dark); }
+        [data-theme="dark"] .card             { background: var(--card); border-color: var(--border); }
+        [data-theme="dark"] .room-card        { background: var(--card); border-color: var(--border); }
+        [data-theme="dark"] .input-field      { background: var(--input-bg); border-color: var(--border); color: var(--dark); }
+        [data-theme="dark"] #post-textarea    { background: transparent; color: var(--dark); }
+        [data-theme="dark"] .mobile-nav       { background: rgba(26,26,34,.98) !important; border-color: var(--border) !important; }
+        [data-theme="dark"] .mobile-top-bar   { background: rgba(15,15,19,.97) !important; border-color: var(--border) !important; }
+        [data-theme="dark"] .modal-sheet      { background: var(--card); }
+        [data-theme="dark"] .search-modal-sheet { background: var(--card); }
+        [data-theme="dark"] .pp-modal-sheet   { background: var(--card); }
+        [data-theme="dark"] .comment-bubble   { background: #22222e; }
+        [data-theme="dark"] #comment-input    { background: var(--input-bg); border-color: var(--border); color: var(--dark); }
+        [data-theme="dark"] #search-input     { color: var(--dark); }
+        [data-theme="dark"] .reaction-btn     { border-color: var(--border); color: var(--muted); }
+        [data-theme="dark"] .reaction-btn:hover { background: #2a1a2e; }
+        [data-theme="dark"] .trend-tag        { background: #1e1e2a; color: var(--dark); }
+        [data-theme="dark"] .tab-btn.active   { background: var(--dark); color: var(--bg); }
+        [data-theme="dark"] .skel             { background: linear-gradient(90deg,#1e1e2a 25%,#2a2a36 50%,#1e1e2a 75%); background-size:600px 100%; }
+        [data-theme="dark"] p, [data-theme="dark"] .comment-text { color: var(--text-body); }
         * { box-sizing: border-box; }
         body {
             background: var(--bg);
@@ -573,6 +610,9 @@
         <button onclick="openSearch()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.05rem;padding:6px;border-radius:10px;transition:color .15s" title="بحث">
             <i class="fa-solid fa-magnifying-glass"></i>
         </button>
+        <button onclick="toggleDarkMode()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.05rem;padding:6px;border-radius:10px;transition:color .15s" title="الوضع الليلي">
+            <i class="fa-solid fa-moon theme-toggle-icon"></i>
+        </button>
         <button onclick="openNotifications()" style="position:relative;background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:6px;border-radius:10px;transition:color .15s" title="الإشعارات">
             <i class="fa-regular fa-bell notif-bell"></i>
             <span class="notif-badge" style="display:none"></span>
@@ -741,6 +781,9 @@
                 <i class="fa-regular fa-bell notif-bell" style="font-size:1rem"></i>
                 <span class="notif-badge" style="display:none"></span>
             </button>
+            <button onclick="toggleDarkMode()" style="width:40px;height:40px;border-radius:12px;border:2px solid var(--border);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--muted);transition:all .15s" title="الوضع الليلي">
+                <i class="fa-solid fa-moon theme-toggle-icon"></i>
+            </button>
         </div>
 
         <div id="auth-toggle-btn">
@@ -821,6 +864,8 @@
 
             <!-- Posts -->
             <div id="posts-container" style="display:flex;flex-direction:column;gap:12px"></div>
+            <!-- Infinite Scroll Sentinel -->
+            <div id="scroll-sentinel" style="height:40px;display:flex;align-items:center;justify-content:center"></div>
         </section>
 
         <!-- ─── ROOMS VIEW ─── -->
